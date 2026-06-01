@@ -1,10 +1,11 @@
+#!/usr/bin/env bash
 # goto-github constants
 # Source this file: source "$(dirname "${BASH_SOURCE[0]}")/00-constants.sh"
 # DO NOT execute directly.
 
 # Guard against double-sourcing
 case "${_GOTO_GITHUB_00_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_00_INCLUDED=1
 

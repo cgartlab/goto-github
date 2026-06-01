@@ -1,17 +1,24 @@
+#!/usr/bin/env bash
 # goto-github installation functions
 # Source after 00-constants.sh, 01-utils.sh, 04-apply.sh
 # Provides: install_files, install_scheduler, install_sudoers, install
 
 # Guard pattern
 case "${_GOTO_GITHUB_05_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_05_INCLUDED=1
 
 # Source directory detection — where the repo/scripts live at install time
-_GOTO_GITHUB_SRC=""
-detect_src_dir() {
-  _GOTO_GITHUB_SRC=$(dirname "$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")")
+_get_script_dir() {
+  local source="${BASH_SOURCE[0]}"
+  while [ -h "$source" ]; do
+    local dir
+    dir=$(dirname "$source")
+    source=$(readlink "$source")
+    [[ $source != /* ]] && source="$dir/$source"
+  done
+  dirname "$source"
 }
 
 # ============================================================================
@@ -91,9 +98,9 @@ install_launchd() {
     <key>StartInterval</key>
     <integer>$SCHEDULER_INTERVAL</integer>
     <key>StandardOutPath</key>
-    <string>/var/log/goto-github.log</string>
+    <string>$HOME/Library/Logs/goto-github.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/goto-github.err</string>
+    <string>$HOME/Library/Logs/goto-github.err</string>
 </dict>
 </plist>
 PLIST
@@ -128,7 +135,6 @@ install_systemd() {
     sudo cp "$timer_template" "$timer_file"
     sudo sed -i "s|/opt/goto-github|$INSTALL_DIR|g" "$service_file" "$timer_file"
   else
-    # Write service file inline
     cat > /tmp/goto-github.service <<-SVC
 [Unit]
 Description=GoToGitHub - run GitHub hosts scan once
@@ -140,7 +146,7 @@ Type=oneshot
 ExecStart=$INSTALL_DIR/bin/goto-github.sh run
 StandardOutput=append:/var/log/goto-github.log
 StandardError=append:/var/log/goto-github.log
-Nice=10
+Nice=5
 SVC
     sudo cp /tmp/goto-github.service "$service_file"
 
@@ -190,12 +196,23 @@ install_sudoers() {
     return 0
   fi
 
-  echo "Installing passwordless sudo for hosts modification..."
-  echo "${current_user} ALL=(ALL) NOPASSWD: /usr/bin/cp, /usr/bin/sed, /usr/bin/tee, /usr/bin/killall, /usr/sbin/dscacheutil" | \
-    sudo tee "$sudoers_file" >/dev/null
+  echo "Installing restricted sudoers for hosts modification..."
+  cat > /tmp/goto-github-sudoers <<EOF
+# GoToGitHub - restricted sudoers for /etc/hosts management
+# WARNING: This grants limited passwordless sudo access
+Cmnd_Alias GOTO_GITHUB_HOSTS = /usr/bin/sed -i.bak *-e */etc/hosts, /usr/bin/tee -a /etc/hosts, /usr/bin/tee */etc/hosts
+Cmnd_Alias GOTO_GITHUB_DNS = /usr/bin/killall -HUP mDNSResponder, /usr/sbin/dscacheutil -flushcache
+${current_user} ALL=(ALL) NOPASSWD: GOTO_GITHUB_HOSTS, GOTO_GITHUB_DNS
+EOF
+  sudo cp /tmp/goto-github-sudoers "$sudoers_file"
   sudo chmod 440 "$sudoers_file"
+  rm -f /tmp/goto-github-sudoers
+  sudo visudo -c -f "$sudoers_file" || {
+    sudo rm -f "$sudoers_file"
+    die "Invalid sudoers syntax"
+  }
   log "sudoers entry installed for $current_user"
-  echo "  Sudoers:   $sudoers_file (passwordless for cp/sed/tee/killall/dscacheutil)"
+  echo "  Sudoers:   $sudoers_file (restricted to hosts/dns commands only)"
 }
 
 # ============================================================================

@@ -1,10 +1,11 @@
+#!/usr/bin/env bash
 # goto-github validation functions
 # Source this file: source "$(dirname "${BASH_SOURCE[0]}")/03-validate.sh"
 # DO NOT execute directly.
 
 # Guard against double-sourcing
 case "${_GOTO_GITHUB_03_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_03_INCLUDED=1
 

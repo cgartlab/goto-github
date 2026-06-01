@@ -20,9 +20,14 @@ all: lint
 
 # ── Install ──────────────────────────────────────────────────────────────
 
-install: check-platform install-files
+install: check-platform validate-install-dir install-files
 	@echo "✓ GoToGitHub installed to $(INSTALL_DIR)"
 	@echo "  Run 'goto-github run' to scan and update /etc/hosts"
+
+validate-install-dir:
+	@if [ ! -d "$(dir $(INSTALL_DIR))" ]; then \
+		echo "ERROR: Parent directory of INSTALL_DIR must exist: $(dir $(INSTALL_DIR))"; exit 1; \
+	fi
 
 install-files:
 	@echo "Installing GoToGitHub to $(INSTALL_DIR)..."

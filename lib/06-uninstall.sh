@@ -1,10 +1,11 @@
+#!/usr/bin/env bash
 # goto-github uninstallation functions
 # Source after 00-constants.sh, 01-utils.sh, 04-apply.sh
 # Provides: uninstall_scheduler, uninstall_sudoers, uninstall_files, uninstall
 
 # Guard pattern
 case "${_GOTO_GITHUB_06_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_06_INCLUDED=1
 
@@ -74,8 +75,12 @@ uninstall_files() {
     echo "  Removed:   $symlink"
   fi
 
-  # Remove install directory
+  # Remove install directory (safety check)
   if [ -d "$INSTALL_DIR" ]; then
+    case "$INSTALL_DIR" in
+      /opt/goto-github|/usr/local/goto-github) ;;  # Safe paths
+      *) die "Refusing to rm -rf: INSTALL_DIR=$INSTALL_DIR" ;;
+    esac
     sudo rm -rf "$INSTALL_DIR"
     log "install directory removed: $INSTALL_DIR"
     echo "  Removed:   $INSTALL_DIR/"
