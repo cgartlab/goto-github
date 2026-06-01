@@ -4,7 +4,7 @@
 
 # Guard pattern
 case "${_GOTO_GITHUB_04_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_04_INCLUDED=1
 
@@ -18,49 +18,45 @@ apply_hosts() {
   local ip="$1"
   [ -z "$ip" ] && die "apply_hosts: no IP provided"
 
-  local core_domains
-  core_domains="${CORE_DOMAINS_0} ${CORE_DOMAINS_1} ${CORE_DOMAINS_2} ${CORE_DOMAINS_3} ${CORE_DOMAINS_4} ${CORE_DOMAINS_5} ${CORE_DOMAINS_6} ${CORE_DOMAINS_7}"
+  local domains=(
+    "$CORE_DOMAINS_0" "$CORE_DOMAINS_1" "$CORE_DOMAINS_2" "$CORE_DOMAINS_3"
+    "$CORE_DOMAINS_4" "$CORE_DOMAINS_5" "$CORE_DOMAINS_6" "$CORE_DOMAINS_7"
+  )
 
-  # Build new block content
-  local header=""
-  header="${MARKER_START}"
-  header="${header}
-# Managed by goto-github — do not edit manually"
-  header="${header}
-# Updated at $(date '+%Y-%m-%d %H:%M:%S')"
-  header="${header}
-# Best IP: ${ip}"
+  local tmpblock
+  tmpblock=$(mktemp -t goto-github.XXXXXX)
+  trap "rm -f '$tmpblock'" EXIT
 
-  local footer="${MARKER_END}"
+  {
+    echo "$MARKER_START"
+    echo "# Managed by goto-github — do not edit manually"
+    echo "# Updated at $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# Best IP: ${ip}"
+    for d in "${domains[@]}"; do
+      echo "${ip} ${d}"
+    done
+    echo "$MARKER_END"
+  } > "$tmpblock"
 
-  # Check if marker section already exists
   if grep -q "^${MARKER_START}" "$HOSTS_FILE" 2>/dev/null; then
-    # Replace existing block
     log "Replacing existing goto-github block in $HOSTS_FILE with IP $ip"
-    sudo sed -i '' "/^${MARKER_START}/,/^${MARKER_END}/c\\
-${header}\\
-$(for d in $core_domains; do echo "${ip} ${d}"; done)\\
-${footer}\\
-" "$HOSTS_FILE" 2>/dev/null || \
-    sudo sed -i "/^${MARKER_START}/,/^${MARKER_END}/c\\
-${header}\\
-$(for d in $core_domains; do echo "${ip} ${d}"; done)\\
-${footer}\\
-" "$HOSTS_FILE"
+    if is_macos; then
+      sudo sed -i '' "/^${MARKER_START}/,/^${MARKER_END}/d" "$HOSTS_FILE"
+    else
+      sudo sed -i "/^${MARKER_START}/,/^${MARKER_END}/d" "$HOSTS_FILE"
+    fi
   else
-    # Append new block before final newline
     log "Adding goto-github block to $HOSTS_FILE with IP $ip"
-    {
-      echo ""
-      echo "$header"
-      for d in $core_domains; do
-        echo "${ip} ${d}"
-      done
-      echo "$footer"
-    } | sudo tee -a "$HOSTS_FILE" >/dev/null
   fi
 
-  # Write cache
+  {
+    echo ""
+    cat "$tmpblock"
+  } | sudo tee -a "$HOSTS_FILE" >/dev/null
+
+  rm -f "$tmpblock"
+  trap - EXIT
+
   write_cache "$CACHE_FILE" "$ip"
   log "Applied $ip to $HOSTS_FILE"
   return 0

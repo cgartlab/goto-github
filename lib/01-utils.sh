@@ -4,7 +4,7 @@
 
 # Guard pattern
 case "${_GOTO_GITHUB_01_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_01_INCLUDED=1
 
@@ -30,7 +30,12 @@ log() {
 die() {
   echo "ERROR: $*" >&2
   log "FATAL: $*"
-  exit 1
+  # In interactive shell, return error instead of exiting
+  if [[ $- == *i* ]]; then
+    return 1
+  else
+    exit 1
+  fi
 }
 
 # ============================================================================
@@ -104,8 +109,9 @@ write_cache() {
   local value="$2"
   local dir
   dir=$(dirname "$file")
-  [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null || true
-  printf "%s\n" "$value" > "$file" 2>/dev/null || true
+  [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null || return 1
+  printf "%s\n" "$value" > "$file" 2>/dev/null || return 1
+  return 0
 }
 
 # ============================================================================

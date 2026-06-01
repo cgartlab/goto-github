@@ -11,7 +11,7 @@
 # Strict mode: fail fast, no hidden errors
 set -o nounset
 set -o pipefail
-# No -o errexit: we handle errors explicitly in scan/apply logic
+set -o errexit
 
 # ============================================================================
 # Find project root (this script's directory's parent)
@@ -57,12 +57,9 @@ cmd_run() {
 
   local scan_result
   if scan_result=$(scan_all); then
-    # scan_result format: ip:time:size
-    local best_ip
+    local best_ip response_time content_size
     best_ip=$(echo "$scan_result" | cut -d: -f1)
-    local response_time
     response_time=$(echo "$scan_result" | cut -d: -f2)
-    local content_size
     content_size=$(echo "$scan_result" | cut -d: -f3)
 
     echo "  Best IP:   $best_ip"
@@ -70,7 +67,7 @@ cmd_run() {
     echo "  Content:   $((content_size / 1024))KB"
     echo ""
 
-    apply_hosts "$best_ip"
+    apply_hosts "$best_ip" || die "Failed to apply hosts"
     flush_dns
 
     echo ""

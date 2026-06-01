@@ -4,7 +4,7 @@
 
 # Guard against double-sourcing
 case "${_GOTO_GITHUB_03_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_03_INCLUDED=1
 

@@ -4,7 +4,7 @@
 
 # Guard pattern
 case "${_GOTO_GITHUB_02_INCLUDED:-}" in
-  *1*) return 0 ;;
+  1) return 0 ;;
 esac
 readonly _GOTO_GITHUB_02_INCLUDED=1
 
@@ -127,7 +127,7 @@ scan_priority_ips() {
   local best_result
   local line
 
-  tmpfile=$(mktemp)
+  tmpfile=$(mktemp -t goto-github.XXXXXX)
   trap "rm -f '$tmpfile'" EXIT
 
   # Run all priority IPs in parallel
@@ -139,8 +139,7 @@ scan_priority_ips() {
   # Wait for all background jobs to complete
   wait
 
-  # Sort by time (field 2) and find best valid result
-  # Format: OK:ip:time:size
+  # Sort by response time (field 3 = time in OK:ip:time:size format)
   best_result=$(sort -t: -k3 -n "$tmpfile" 2>/dev/null | grep '^OK:' | head -1)
 
   if [ -n "$best_result" ]; then
@@ -169,7 +168,7 @@ scan_cidr_range() {
   local result
   local best_result
 
-  tmpfile=$(mktemp)
+  tmpfile=$(mktemp -t goto-github.XXXXXX)
   trap "rm -f '$tmpfile'" EXIT
 
   # Read all IPs from expand_cidrs_to_ips
@@ -179,20 +178,19 @@ scan_cidr_range() {
   # Process in batches of CONCURRENT_BATCH (default 100)
   local batch_size="${CONCURRENT_BATCH:-100}"
   local count=0
-  local batch=""
+  local batch=()
 
-  for ip in $all_ips; do
+  while IFS= read -r ip; do
+    [ -z "$ip" ] && continue
     count=$((count + 1))
-    batch="$batch $ip"
+    batch+=("$ip")
 
     if [ $count -ge $batch_size ]; then
-      # Launch this batch in parallel
-      for j in $batch; do
+      for j in "${batch[@]}"; do
         (validate_ip "$j" >> "$tmpfile") &
       done
       wait
 
-      # Check if we got any valid result
       best_result=$(sort -t: -k3 -n "$tmpfile" 2>/dev/null | grep '^OK:' | head -1)
       if [ -n "$best_result" ]; then
         echo "${best_result#OK:}"
@@ -201,15 +199,14 @@ scan_cidr_range() {
         return 0
       fi
 
-      # Reset for next batch
       count=0
-      batch=""
+      batch=()
     fi
-  done
+  done <<< "$all_ips"
 
   # Process remaining batch
-  if [ -n "$batch" ]; then
-    for j in $batch; do
+  if [ ${#batch[@]} -gt 0 ]; then
+    for j in "${batch[@]}"; do
       (validate_ip "$j" >> "$tmpfile") &
     done
     wait
