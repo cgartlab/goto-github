@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # goto-github installation functions
 # Source after 00-constants.sh, 01-utils.sh, 04-apply.sh
 # Provides: install_files, install_scheduler, install_sudoers, install

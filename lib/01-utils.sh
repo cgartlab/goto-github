@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # goto-github utility functions
 # Source after 00-constants.sh, before 02-scan.sh
 # Provides: log, die, check_deps, is_macos, is_linux, check_sudo

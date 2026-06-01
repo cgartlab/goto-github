@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # goto-github uninstallation functions
 # Source after 00-constants.sh, 01-utils.sh, 04-apply.sh
 # Provides: uninstall_scheduler, uninstall_sudoers, uninstall_files, uninstall

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # goto-github validation functions
 # Source this file: source "$(dirname "${BASH_SOURCE[0]}")/03-validate.sh"
 # DO NOT execute directly.

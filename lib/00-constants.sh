@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # goto-github constants
 # Source this file: source "$(dirname "${BASH_SOURCE[0]}")/00-constants.sh"
 # DO NOT execute directly.

@@ -1,12 +1,13 @@
 # GoToGitHub shellcheck configuration
 
-# We target Bash 3.2+ (macOS default) and POSIX sh
+# We target Bash 3.2+ (macOS default)
 # SC2039: In POSIX sh, something is undefined — we know, we use bash
 # SC1090: Can't follow non-constant source — dynamic sourcing is intentional
 # SC1091: Not following — sourced at runtime, fine
 # SC2154: Variable is referenced but not assigned — assigned via source
 # SC2086: Double quote to prevent globbing — intentional in some contexts
-disable=SC2039,SC1090,SC1091,SC2154
+# SC2034: Variable appears unused — used in other sourced files
+disable=SC2039,SC1090,SC1091,SC2154,SC2034
 
 # Prefer [[ ]] over [ ] (we target bash, but see SC2039)
 # We target bash, shellcheck is run in an environment with bash

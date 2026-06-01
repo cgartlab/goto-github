@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # goto-github scanning logic
 # Source order: 00-constants.sh -> 02-scan.sh
 # (01-utils.sh optional, 03-validate.sh optional - this file is self-contained)
@@ -128,6 +129,7 @@ scan_priority_ips() {
   local line
 
   tmpfile=$(mktemp -t goto-github.XXXXXX)
+  # shellcheck disable=SC2064  # We want expansion at definition time, not signal time
   trap "rm -f '$tmpfile'" EXIT
 
   # Run all priority IPs in parallel
@@ -169,6 +171,7 @@ scan_cidr_range() {
   local best_result
 
   tmpfile=$(mktemp -t goto-github.XXXXXX)
+  # shellcheck disable=SC2064
   trap "rm -f '$tmpfile'" EXIT
 
   # Read all IPs from expand_cidrs_to_ips

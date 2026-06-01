@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # goto-github apply functions
 # Source after 00-constants.sh and 01-utils.sh
 # Provides: apply_hosts, flush_dns, verify_hosts, clear_hosts
@@ -25,6 +26,7 @@ apply_hosts() {
 
   local tmpblock
   tmpblock=$(mktemp -t goto-github.XXXXXX)
+  # shellcheck disable=SC2064
   trap "rm -f '$tmpblock'" EXIT
 
   {
