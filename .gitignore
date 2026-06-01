@@ -1,0 +1,20 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Build/package
+*.deb
+*.rpm
+*.tar.gz
+pkg/
+
+# Temporary
+/tmp/
+*.tmp

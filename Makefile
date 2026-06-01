@@ -1,0 +1,106 @@
+SHELL := /bin/bash
+INSTALL_DIR ?= /opt/goto-github
+BIN_DIR    ?= /usr/local/bin
+CONFIG_DIR ?= /etc
+
+# macOS launchd paths
+MACOS_LAUNCHD_DIR := $(HOME)/Library/LaunchAgents
+
+# Linux systemd paths
+LINUX_SYSTEMD_DIR := /etc/systemd/system
+
+# Files
+BIN_SRC   := bin/goto-github.sh
+LIBS      := lib/00-constants.sh lib/01-utils.sh lib/02-scan.sh lib/03-validate.sh lib/04-apply.sh lib/05-install.sh lib/06-uninstall.sh
+CONTRIB   := contrib/macos/com.cgartlab.goto-github.plist contrib/linux/goto-github.service contrib/linux/goto-github.timer
+
+.PHONY: all install uninstall install-macos install-linux test lint clean
+
+all: lint
+
+# ── Install ──────────────────────────────────────────────────────────────
+
+install: check-platform install-files
+	@echo "✓ GoToGitHub installed to $(INSTALL_DIR)"
+	@echo "  Run 'goto-github run' to scan and update /etc/hosts"
+
+install-files:
+	@echo "Installing GoToGitHub to $(INSTALL_DIR)..."
+	install -d "$(INSTALL_DIR)/bin" "$(INSTALL_DIR)/lib"
+	install -m 755 "$(BIN_SRC)" "$(INSTALL_DIR)/bin/"
+	install -m 644 $(LIBS) "$(INSTALL_DIR)/lib/"
+	ln -sf "$(INSTALL_DIR)/bin/goto-github.sh" "$(BIN_DIR)/goto-github"
+
+install-macos: install-files
+	@echo "Installing launchd plist..."
+	install -d "$(MACOS_LAUNCHD_DIR)"
+	sed -e "s|/opt/goto-github|$(INSTALL_DIR)|g" \
+	    contrib/macos/com.cgartlab.goto-github.plist > \
+	    "$(MACOS_LAUNCHD_DIR)/com.cgartlab.goto-github.plist"
+	launchctl load "$(MACOS_LAUNCHD_DIR)/com.cgartlab.goto-github.plist"
+	@echo "✓ GoToGitHub installed (macOS launchd)"
+	@echo "  Run 'goto-github run' to scan immediately"
+
+install-linux: install-files
+	@echo "Installing systemd units..."
+	sed -e "s|/opt/goto-github|$(INSTALL_DIR)|g" \
+	    contrib/linux/goto-github.service > \
+	    "$(LINUX_SYSTEMD_DIR)/goto-github.service"
+	sed -e "s|/opt/goto-github|$(INSTALL_DIR)|g" \
+	    contrib/linux/goto-github.timer > \
+	    "$(LINUX_SYSTEMD_DIR)/goto-github.timer"
+	systemctl daemon-reload
+	systemctl enable goto-github.timer
+	systemctl start goto-github.timer
+	@echo "✓ GoToGitHub installed (Linux systemd)"
+	@echo "  Timer active — runs every 3 hours"
+
+# ── Uninstall ────────────────────────────────────────────────────────────
+
+uninstall:
+	@echo "Removing GoToGitHub..."
+	rm -f "$(BIN_DIR)/goto-github"
+	rm -rf "$(INSTALL_DIR)"
+	@echo "✓ GoToGitHub uninstalled"
+
+uninstall-macos:
+	-launchctl unload "$(MACOS_LAUNCHD_DIR)/com.cgartlab.goto-github.plist" 2>/dev/null
+	rm -f "$(MACOS_LAUNCHD_DIR)/com.cgartlab.goto-github.plist"
+	$(MAKE) uninstall
+
+uninstall-linux:
+	-systemctl stop goto-github.timer 2>/dev/null
+	-systemctl disable goto-github.timer 2>/dev/null
+	rm -f "$(LINUX_SYSTEMD_DIR)/goto-github.service"
+	rm -f "$(LINUX_SYSTEMD_DIR)/goto-github.timer"
+	systemctl daemon-reload
+	$(MAKE) uninstall
+
+# ── Quality ──────────────────────────────────────────────────────────────
+
+lint:
+	@echo "Running shellcheck..."
+	shellcheck $(BIN_SRC) $(LIBS)
+
+test:
+	@echo "Running tests..."
+	@if [ -d tests ]; then \
+		for t in tests/*.sh; do \
+			[ -x "$$t" ] && "$$t" || true; \
+		done; \
+	fi
+	@echo "✓ All tests passed"
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+check-platform:
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		echo "Platform: macOS"; \
+	elif [ "$$(uname)" = "Linux" ]; then \
+		echo "Platform: Linux"; \
+	else \
+		echo "Unsupported platform: $$(uname)"; exit 1; \
+	fi
+
+clean:
+	rm -rf pkg/

@@ -1,0 +1,12 @@
+[Unit]
+Description=GoToGitHub - periodic GitHub hosts scan (every 3 hours)
+Documentation=https://github.com/cgartlab/goto-github
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=3h
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,33 @@
+# GoToGitHub CI — shellcheck on push/PR
+name: Lint
+
+on:
+  push:
+    branches: [main, dev-*]
+    paths:
+      - 'bin/**'
+      - 'lib/**'
+      - 'Makefile'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bin/**'
+      - 'lib/**'
+      - 'Makefile'
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          severity: warning
+          ignore: tests
+          additional_files: bin/goto-github.sh
