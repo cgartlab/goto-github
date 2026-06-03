@@ -16,7 +16,7 @@
     <true/>
 
     <key>StartInterval</key>
-    <integer>900</integer>
+    <integer>__SCHEDULER_INTERVAL__</integer>
 
     <key>StandardOutPath</key>
     <string>/var/log/goto-github.log</string>

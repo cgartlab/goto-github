@@ -76,6 +76,7 @@ install_launchd() {
   template="$(dirname "$(dirname "$0")")/contrib/macos/$SCHEDULER_LABEL.plist"
   if [ -f "$template" ]; then
     sudo cp "$template" "$plist_dest"
+    sudo sed -i "s|__SCHEDULER_INTERVAL__|$SCHEDULER_INTERVAL|g" "$plist_dest"
   else
     # Generate plist inline
     /usr/libexec/PlistBuddy -c "Add Label string $SCHEDULER_LABEL" "$plist_dest" 2>/dev/null || {
