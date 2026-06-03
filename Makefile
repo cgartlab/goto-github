@@ -36,10 +36,16 @@ install-files:
 	install -m 644 $(LIBS) "$(INSTALL_DIR)/lib/"
 	ln -sf "$(INSTALL_DIR)/bin/goto-github.sh" "$(BIN_DIR)/goto-github"
 
+SCHEDULER_INTERVAL := $(shell sed -n 's/^readonly SCHEDULER_INTERVAL=\([0-9]\{1,\}\).*/\1/p' lib/00-constants.sh)
+ifndef SCHEDULER_INTERVAL
+$(error Failed to extract SCHEDULER_INTERVAL from lib/00-constants.sh)
+endif
+
 install-macos: install-files
 	@echo "Installing launchd plist..."
 	install -d "$(MACOS_LAUNCHD_DIR)"
 	sed -e "s|/opt/goto-github|$(INSTALL_DIR)|g" \
+	    -e "s|__SCHEDULER_INTERVAL__|$(SCHEDULER_INTERVAL)|g" \
 	    contrib/macos/com.cgartlab.goto-github.plist > \
 	    "$(MACOS_LAUNCHD_DIR)/com.cgartlab.goto-github.plist"
 	launchctl load "$(MACOS_LAUNCHD_DIR)/com.cgartlab.goto-github.plist"
@@ -89,11 +95,31 @@ lint:
 
 test:
 	@echo "Running tests..."
-	@if [ -d tests ]; then \
-		for t in tests/*.sh; do \
-			[ -x "$$t" ] && "$$t" || true; \
+	@bash_failed=0; pwsh_failed=0; bash_count=0; pwsh_count=0
+	@for t in tests/test-*.sh; do \
+		[ -f "$$t" ] || continue; \
+		bash_count=$$((bash_count + 1)); \
+		echo ""; \
+		if ! bash "$$t"; then bash_failed=$$((bash_failed + 1)); fi; \
+	done
+	@if command -v pwsh >/dev/null 2>&1; then \
+		for t in tests/test-ps-*.ps1; do \
+			[ -f "$$t" ] || continue; \
+			pwsh_count=$$((pwsh_count + 1)); \
+			echo ""; \
+			if ! pwsh -NoProfile -File "$$t"; then pwsh_failed=$$((pwsh_failed + 1)); fi; \
 		done; \
+	else \
+		echo ""; \
+		echo "(pwsh not found, skipping PowerShell tests)"; \
 	fi
+	@echo ""
+	@echo "================================="
+	@echo "Bash:    $$bash_count files"
+	@echo "PowerShell: $$pwsh_count files"
+	@echo "Failures: bash=$$bash_failed pwsh=$$pwsh_failed"
+	@echo "================================="
+	@if [ $$((bash_failed + pwsh_failed)) -gt 0 ]; then exit 1; fi
 	@echo "✓ All tests passed"
 
 # ── Helpers ──────────────────────────────────────────────────────────────
