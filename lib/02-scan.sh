@@ -229,20 +229,63 @@ scan_cidr_range() {
 }
 
 # -----------------------------------------------------------------------------
-# scan_all - tries priority IPs first, falls back to CIDR range scan
-# Returns the result of whichever succeeded (priority first)
+# scan_all - tries (1) cloud fetch, (2) priority IPs, (3) CIDR range scan
+# Returns the result of whichever succeeded (cloud first)
 # Output: ip:time:size or empty
 # -----------------------------------------------------------------------------
 scan_all() {
   local result
 
-  # Try priority IPs first
+  # Phase 1: Try cloud-sourced IPs from GitHub Actions (fastest, most reliable)
+  # Cloud fetch returns JSON with the result; extract best IP in ip:time format
+  if declare -f fetch_cloud_ips >/dev/null 2>&1; then
+    local cloud_json best_ip best_time best_size
+    cloud_json=$(fetch_cloud_ips 2>/dev/null)
+    if [ -n "$cloud_json" ]; then
+      best_ip=$(echo "$cloud_json" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    s=d.get('servers',{}).get('github.com',{})
+    print(s.get('best_ip',''))
+except: pass
+" 2>/dev/null)
+      best_time=$(echo "$cloud_json" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    s=d.get('servers',{}).get('github.com',{})
+    print(s.get('best_time','0'))
+except: pass
+" 2>/dev/null)
+      best_size=$(echo "$cloud_json" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    s=d.get('servers',{}).get('github.com',{})
+    print(s.get('best_size','100000'))
+except: pass
+" 2>/dev/null)
+
+      if [ -n "$best_ip" ]; then
+        log "scan_all: cloud fetch successful (best IP: $best_ip)"
+        write_cloud_cache "$cloud_json"
+        echo "${best_ip}:${best_time:-0}:${best_size:-100000}"
+        return 0
+      fi
+    fi
+    log "scan_all: cloud fetch unavailable, trying local scan"
+  fi
+
+  # Phase 2: Try priority IPs first
+  log "scan_all: trying priority IPs"
   if result=$(scan_priority_ips); then
     echo "$result"
     return 0
   fi
 
-  # Fall back to CIDR range scan
+  # Phase 3: Fall back to CIDR range scan
+  log "scan_all: priority IPs failed, falling back to CIDR scan"
   if result=$(scan_cidr_range); then
     echo "$result"
     return 0

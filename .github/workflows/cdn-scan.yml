@@ -1,0 +1,97 @@
+# GoToGitHub CDN IP Scan — runs periodically and publishes results to a Gist
+# ============================================================================
+# This workflow scans GitHub CDN IPs from within GitHub's network (no GFW
+# interference) and publishes the authoritative host configuration to a Gist.
+# Local clients fetch this Gist for near-instant hosts configuration.
+#
+# Free tier note: Public repo Actions minutes are free. Schedule is set to
+# every 12h (~60 runs/month, ~2-3 min each) to stay well under any limits.
+# ============================================================================
+name: CDN Scan
+
+on:
+  schedule:
+    # Every 12 hours — refresh twice daily (conservative free-tier usage)
+    # Estimated: ~120 min/month = ~6% of free tier (2000 min)
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+    # Allow manual trigger from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  scan-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run cloud IP scan
+        id: scan
+        run: |
+          python3 scripts/cloud-scan.py --output scan-result.json
+          echo "=== Scan complete ==="
+          python3 -c "
+import json
+d = json.load(open('scan-result.json'))
+print(f'IPs tested: {len(d[\"meta\"][\"total_ips_tested\"])}')
+print(f'Servers configured: {len(d[\"servers\"])}')
+"
+
+      - name: Update Gist with scan results
+        env:
+          GH_TOKEN: ${{ secrets.GIST_TOKEN || secrets.GITHUB_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+        run: |
+          if [ -z "$GIST_ID" ]; then
+            echo "No GIST_ID configured. Creating a new Gist..."
+            GIST_URL=$(gh gist create scan-result.json \
+              --filename "goto-github-hosts.json" \
+              --description "GoToGitHub — Live GitHub CDN IP scan results" \
+              --public 2>&1)
+            GIST_ID=$(echo "$GIST_URL" | awk -F/ '{print $NF}')
+            echo "=== NEW GIST CREATED ==="
+            echo "Gist URL: $GIST_URL"
+            echo "GIST_ID: $GIST_ID"
+            echo ""
+            echo "IMPORTANT: Add this GIST_ID to your repo secrets!"
+            echo "  gh secret set GIST_ID --body \"$GIST_ID\""
+          else
+            echo "Updating existing Gist: $GIST_ID"
+            gh gist edit "$GIST_ID" \
+              --add "scan-result.json:goto-github-hosts.json"
+            echo "Gist updated: https://gist.github.com/$GIST_ID"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## GoToGitHub Cloud Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          python3 -c "
+import json
+d = json.load(open('scan-result.json'))
+
+servers = d['servers']
+hosts = [s for s in servers.values() if s.get('mode') == 'hosts']
+dns = [s for s in servers.values() if s.get('mode') == 'dns']
+
+print(f'| Total servers configured | {len(hosts) + len(dns)} |')
+print(f'| Via hosts entry | {len(hosts)} |')
+print(f'| Via DNS | {len(dns)} |')
+
+fastest = sorted(
+    [(n, s.get('best_time', 99)) for n, s in servers.items() if s.get('best_time')],
+    key=lambda x: x[1]
+)[:5]
+for name, t in fastest:
+    print(f'| {name} | {t}s |')
+" >> $GITHUB_STEP_SUMMARY

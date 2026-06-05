@@ -24,6 +24,21 @@ apply_hosts() {
     "$CORE_DOMAINS_4" "$CORE_DOMAINS_5" "$CORE_DOMAINS_6" "$CORE_DOMAINS_7"
   )
 
+  # Skip DNS-only domains (they return 400 when pinned to CDN IPs)
+  local filtered_domains=()
+  local d
+  for d in "${domains[@]}"; do
+    local skip=0
+    local dd
+    for dd in ${DNS_DOMAINS:-}; do
+      if [ "$d" = "$dd" ]; then
+        skip=1
+        break
+      fi
+    done
+    [ "$skip" -eq 0 ] && filtered_domains+=("$d")
+  done
+
   local tmpblock
   tmpblock=$(mktemp -t goto-github.XXXXXX)
   # shellcheck disable=SC2064
@@ -34,9 +49,10 @@ apply_hosts() {
     echo "# Managed by goto-github — do not edit manually"
     echo "# Updated at $(date '+%Y-%m-%d %H:%M:%S')"
     echo "# Best IP: ${ip}"
-    for d in "${domains[@]}"; do
+    for d in "${filtered_domains[@]}"; do
       echo "${ip} ${d}"
     done
+    echo "# DNS domains (not pinned): ${DNS_DOMAINS}"
     echo "$MARKER_END"
   } > "$tmpblock"
 
@@ -126,6 +142,19 @@ show_status() {
   echo "=== GoToGitHub Status ==="
   echo ""
 
+  # Check if we have cloud-sourced data
+  local cloud_source="(none)"
+  if [ -f "$CLOUD_CACHE_FILE" ]; then
+    cloud_source=$(head -1 "$CLOUD_CACHE_FILE" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    print(d.get('updated_at','(stale)'))
+except:
+    print('(stale)')
+" 2>/dev/null || echo "(stale)")
+  fi
+
   local current_ip
   current_ip=$(extract_ip_from_hosts 2>/dev/null)
   if [ -n "$current_ip" ]; then
@@ -152,6 +181,7 @@ show_status() {
     echo "  Cached IP:  (none)"
   fi
 
+  echo "  Cloud scan: $cloud_source"
   echo ""
   echo "  Hosts file: $HOSTS_FILE"
   echo "  Log file:   $LOG_FILE"
