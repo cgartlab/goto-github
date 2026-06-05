@@ -72,3 +72,14 @@ readonly CONNECT_TIMEOUT=3
 readonly MAX_TIME=6
 readonly MIN_CONTENT_SIZE=100000
 readonly MIN_CACHE_TTL=300
+
+# Cloud scan settings (GoToGitHub CDN Scan from GitHub Actions)
+# Gist raw URL for fetching pre-verified GitHub CDN IPs from cloud scan
+# Override via env var: GIST_RAW_URL
+readonly GIST_RAW_URL="${GIST_RAW_URL:-https://gist.githubusercontent.com/cgartlab/goto-github-hosts/raw/goto-github-hosts.json}"
+readonly CLOUD_CACHE_FILE="$HOME/.goto-github-cloud-cache"
+readonly CLOUD_CACHE_TTL=86400
+
+# Domains that should NOT be added to /etc/hosts (GFW intercepts their IPs)
+# These domains resolve fine via DNS but return 400 when pinned to CDN IPs
+readonly DNS_DOMAINS="api.github.com"

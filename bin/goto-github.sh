@@ -4,7 +4,9 @@
 # ============================================================================
 # Usage:
 #   goto-github run       — scan CDN IPs, update /etc/hosts, flush DNS
+#   goto-github fetch     — fetch cloud-sourced IPs from GitHub Actions (fast)
 #   goto-github status    — show current IP and reachability status
+#   goto-github install   — install to INSTALL_DIR with scheduler
 #   goto-github uninstall — remove all GoToGitHub changes from the system
 #   goto-github help      — show this help message
 # ============================================================================
@@ -29,6 +31,7 @@ for _module in \
   "$_GOTO_GITHUB_ROOT/lib/02-scan.sh" \
   "$_GOTO_GITHUB_ROOT/lib/03-validate.sh" \
   "$_GOTO_GITHUB_ROOT/lib/04-apply.sh" \
+  "$_GOTO_GITHUB_ROOT/lib/07-fetch.sh" \
   "$_GOTO_GITHUB_ROOT/lib/05-install.sh" \
   "$_GOTO_GITHUB_ROOT/lib/06-uninstall.sh"; do
   if [ -f "$_module" ]; then
@@ -86,6 +89,12 @@ cmd_run() {
 }
 
 # ============================================================================
+# Command: fetch — cloud-sourced IPs (fast path)
+# Delegates to cmd_fetch in lib/07-fetch.sh
+# ============================================================================
+# (cmd_fetch is defined in lib/07-fetch.sh and sourced above)
+
+# ============================================================================
 # Command: status — show current state
 # ============================================================================
 cmd_status() {
@@ -118,6 +127,7 @@ cmd_help() {
   echo ""
   echo "  Commands:"
   echo "    run         Scan CDN IPs and update /etc/hosts (requires sudo)"
+  echo "    fetch       Fetch cloud-verified IPs from GitHub Actions (fast)"
   echo "    status      Show current IP and reachability status"
   echo "    install     Install to $INSTALL_DIR with scheduler"
   echo "    uninstall   Remove all GoToGitHub changes from the system"
@@ -125,6 +135,7 @@ cmd_help() {
   echo ""
   echo "  Examples:"
   echo "    goto-github run       # Immediate scan + apply"
+  echo "    goto-github fetch     # Fast cloud-sourced IP update"
   echo "    goto-github status    # Check current status"
   echo "    goto-github install   # Install + scheduler setup"
   echo "    goto-github uninstall # Full removal"
@@ -138,6 +149,9 @@ main() {
   case "${1:-help}" in
     run)
       cmd_run
+      ;;
+    fetch)
+      cmd_fetch
       ;;
     status)
       cmd_status

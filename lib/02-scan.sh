@@ -229,20 +229,35 @@ scan_cidr_range() {
 }
 
 # -----------------------------------------------------------------------------
-# scan_all - tries priority IPs first, falls back to CIDR range scan
-# Returns the result of whichever succeeded (priority first)
+# scan_all - tries (1) cloud fetch, (2) priority IPs, (3) CIDR range scan
+# Returns the result of whichever succeeded (cloud first)
 # Output: ip:time:size or empty
 # -----------------------------------------------------------------------------
 scan_all() {
   local result
 
-  # Try priority IPs first
+  # Phase 1: Try cloud-sourced IPs from GitHub Actions (fastest, most reliable)
+  if declare -f fetch_cloud_ips >/dev/null 2>&1; then
+    local cloud_json
+    cloud_json=$(fetch_cloud_ips 2>/dev/null)
+    if [ -n "$cloud_json" ] && [ -f "$CLOUD_CACHE_FILE" ]; then
+      log "scan_all: cloud fetch successful, using cloud-sourced IPs"
+      apply_cloud_hosts "$cloud_json" 2>/dev/null && {
+        write_cloud_cache "$cloud_json"
+        return 0
+      }
+    fi
+  fi
+
+  # Phase 2: Try priority IPs first
+  log "scan_all: cloud fetch unavailable, trying priority IPs"
   if result=$(scan_priority_ips); then
     echo "$result"
     return 0
   fi
 
-  # Fall back to CIDR range scan
+  # Phase 3: Fall back to CIDR range scan
+  log "scan_all: priority IPs failed, falling back to CIDR scan"
   if result=$(scan_cidr_range); then
     echo "$result"
     return 0

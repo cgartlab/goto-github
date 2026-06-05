@@ -1,0 +1,111 @@
+# GoToGitHub CDN IP Scan — runs periodically and publishes results to a Gist
+# ============================================================================
+# This workflow scans GitHub CDN IPs from within GitHub's network (no GFW
+# interference) and publishes the authoritative host configuration to a Gist.
+# Local clients fetch this Gist for near-instant hosts configuration.
+# ============================================================================
+name: CDN Scan
+
+on:
+  schedule:
+    # Every 6 hours — refresh the hosts configuration
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    # Allow manual trigger from the Actions tab
+
+permissions:
+  contents: read
+  # gist write is needed to update the Gist — granted via GITHUB_TOKEN scope
+  # The token used below has 'gist' scope from the repo secret
+
+jobs:
+  scan-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          # cloud-scan.py uses only stdlib + subprocess + curl
+          echo "Dependencies ready"
+
+      - name: Run cloud IP scan
+        id: scan
+        run: |
+          python3 scripts/cloud-scan.py --output scan-result.json
+          echo "hosts_block<<EOF" >> $GITHUB_ENV
+          python3 scripts/cloud-scan.py --format hosts >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "=== Scan complete ==="
+          python3 -c "import json; d=json.load(open('scan-result.json')); print(f'IPs tested: {len(d[\"meta\"][\"total_ips_tested\"])}'); print(f'Servers configured: {len(d[\"servers\"])}')"
+          cat scan-result.json
+
+      - name: Upload scan result as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-result
+          path: scan-result.json
+          retention-days: 7
+
+      - name: Update Gist with scan results
+        env:
+          GH_TOKEN: ${{ secrets.GIST_TOKEN || secrets.GITHUB_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+        run: |
+          if [ -z "$GIST_ID" ]; then
+            echo "No GIST_ID configured. Creating a new Gist..."
+            GIST_URL=$(gh gist create scan-result.json \
+              --filename "goto-github-hosts.json" \
+              --description "GoToGitHub — Live GitHub CDN IP scan results" \
+              --public 2>&1)
+            GIST_ID=$(echo "$GIST_URL" | awk -F/ '{print $NF}')
+            echo "=== NEW GIST CREATED ==="
+            echo "Gist URL: $GIST_URL"
+            echo "GIST_ID: $GIST_ID"
+            echo ""
+            echo "IMPORTANT: Add this GIST_ID and GIST_TOKEN to your repo secrets!"
+            echo "  gh secret set GIST_ID --body \"$GIST_ID\""
+            echo "  gh secret set GIST_TOKEN --body \"your-token-with-gist-scope\""
+          else
+            echo "Updating existing Gist: $GIST_ID"
+            # Download existing gist to get files list
+            gh gist edit "$GIST_ID" \
+              --add "scan-result.json:goto-github-hosts.json"
+            echo "Gist updated: https://gist.github.com/$GIST_ID"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## GoToGitHub Cloud Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          python3 -c "
+import json
+d = json.load(open('scan-result.json'))
+
+servers = d['servers']
+hosts = [s for s in servers.values() if s.get('mode') == 'hosts']
+dns = [s for s in servers.values() if s.get('mode') == 'dns']
+unr = [s for s in servers.values() if s.get('mode') == 'unreachable']
+
+print(f'| Total servers configured | {len(hosts) + len(dns)} |')
+print(f'| Via hosts entry | {len(hosts)} |')
+print(f'| Via DNS | {len(dns)} |')
+
+# Show top 5 fastest domains
+fastest = sorted(
+    [(n, s.get('best_time', 99)) for n, s in servers.items() if s.get('best_time')],
+    key=lambda x: x[1]
+)[:5]
+for name, t in fastest:
+    print(f'| {name} | {t}s |')
+" >> $GITHUB_STEP_SUMMARY
