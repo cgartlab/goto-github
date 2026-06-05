@@ -231,6 +231,13 @@ apply_cloud_hosts() {
 # ============================================================================
 cmd_fetch() {
   check_sudo
+  # Cloud fetch requires Python3 for JSON parsing; local scan has fallback
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required for cloud fetch (JSON parsing)."
+    echo "Falling back to local IP scan..."
+    echo "  Run: sudo ${BASH_SOURCE[0]:-$0} run"
+    return 1
+  fi
 
   echo "GoToGitHub: fetching cloud-sourced IP list..."
   echo ""

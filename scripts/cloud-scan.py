@@ -54,7 +54,7 @@ ALL_DOMAINS = [
 ]
 
 # 应走 DNS 解析的域名（不适合 fixed hosts IP）
-DNS_ONLY_DOMAINS = {"api.github.com", "gist.github.com"}
+DNS_ONLY_DOMAINS = {"api.github.com"}
 
 CONNECT_TIMEOUT = 3
 MAX_TIME = 6
@@ -237,28 +237,8 @@ def generate_hosts_block(best_ips, domain_tests):
     lines.append(f"# Updated at {datetime.now(timezone.utc).isoformat()}")
     lines.append(f"# Source: GitHub Actions cloud scan")
 
-    # Add priority IP all-core-domain line
+    # Group domains by their best-performing IP
     if domain_tests.get("github.com"):
-        best_github = domain_tests["github.com"][0]
-        core_ips = [best_github["ip"]]
-        # Also add best IPs for CORE_DOMAINS
-        # Include core domains on best github.com IP for maximum compatibility
-        core_ip = best_github["ip"]
-
-        # Spread domains across multi IPs based on best performance
-        seen = set()
-        for _, results in sorted(domain_tests.items()):
-            if not results:
-                continue
-            ip = results[0]["ip"]
-            domain = next(
-                (d for d in ALL_DOMAINS if d not in seen
-                 and d not in DNS_ONLY_DOMAINS
-                 and d in [r.get("_d") or _ for _ in []]),
-                None
-            )
-
-        # Alternative: group by IP
         for ip, domains in sorted(ip_groups.items()):
             lines.append(f"{ip:15} {' '.join(domains)}")
 

@@ -3,20 +3,22 @@
 # This workflow scans GitHub CDN IPs from within GitHub's network (no GFW
 # interference) and publishes the authoritative host configuration to a Gist.
 # Local clients fetch this Gist for near-instant hosts configuration.
+#
+# Free tier note: Public repo Actions minutes are free. Schedule is set to
+# every 12h (~60 runs/month, ~2-3 min each) to stay well under any limits.
 # ============================================================================
 name: CDN Scan
 
 on:
   schedule:
-    # Every 6 hours — refresh the hosts configuration
-    - cron: '0 */6 * * *'
+    # Every 12 hours — refresh twice daily (conservative free-tier usage)
+    # Estimated: ~120 min/month = ~6% of free tier (2000 min)
+    - cron: '0 */12 * * *'
   workflow_dispatch:
     # Allow manual trigger from the Actions tab
 
 permissions:
   contents: read
-  # gist write is needed to update the Gist — granted via GITHUB_TOKEN scope
-  # The token used below has 'gist' scope from the repo secret
 
 jobs:
   scan-and-publish:
@@ -31,29 +33,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          # cloud-scan.py uses only stdlib + subprocess + curl
-          echo "Dependencies ready"
-
       - name: Run cloud IP scan
         id: scan
         run: |
           python3 scripts/cloud-scan.py --output scan-result.json
-          echo "hosts_block<<EOF" >> $GITHUB_ENV
-          python3 scripts/cloud-scan.py --format hosts >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
           echo "=== Scan complete ==="
-          python3 -c "import json; d=json.load(open('scan-result.json')); print(f'IPs tested: {len(d[\"meta\"][\"total_ips_tested\"])}'); print(f'Servers configured: {len(d[\"servers\"])}')"
-          cat scan-result.json
-
-      - name: Upload scan result as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: scan-result
-          path: scan-result.json
-          retention-days: 7
+          python3 -c "
+import json
+d = json.load(open('scan-result.json'))
+print(f'IPs tested: {len(d[\"meta\"][\"total_ips_tested\"])}')
+print(f'Servers configured: {len(d[\"servers\"])}')
+"
 
       - name: Update Gist with scan results
         env:
@@ -71,12 +61,10 @@ jobs:
             echo "Gist URL: $GIST_URL"
             echo "GIST_ID: $GIST_ID"
             echo ""
-            echo "IMPORTANT: Add this GIST_ID and GIST_TOKEN to your repo secrets!"
+            echo "IMPORTANT: Add this GIST_ID to your repo secrets!"
             echo "  gh secret set GIST_ID --body \"$GIST_ID\""
-            echo "  gh secret set GIST_TOKEN --body \"your-token-with-gist-scope\""
           else
             echo "Updating existing Gist: $GIST_ID"
-            # Download existing gist to get files list
             gh gist edit "$GIST_ID" \
               --add "scan-result.json:goto-github-hosts.json"
             echo "Gist updated: https://gist.github.com/$GIST_ID"
@@ -95,13 +83,11 @@ d = json.load(open('scan-result.json'))
 servers = d['servers']
 hosts = [s for s in servers.values() if s.get('mode') == 'hosts']
 dns = [s for s in servers.values() if s.get('mode') == 'dns']
-unr = [s for s in servers.values() if s.get('mode') == 'unreachable']
 
 print(f'| Total servers configured | {len(hosts) + len(dns)} |')
 print(f'| Via hosts entry | {len(hosts)} |')
 print(f'| Via DNS | {len(dns)} |')
 
-# Show top 5 fastest domains
 fastest = sorted(
     [(n, s.get('best_time', 99)) for n, s in servers.items() if s.get('best_time')],
     key=lambda x: x[1]
