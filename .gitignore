@@ -18,3 +18,7 @@ pkg/
 # Temporary
 /tmp/
 *.tmp
+
+# Debug scripts with API tokens
+.omo/
+
