@@ -26,3 +26,4 @@ pkg/
 # Debug scripts with API tokens
 .omo/
 
+.opencode/
