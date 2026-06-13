@@ -19,13 +19,9 @@ validate_ip_for_scan() {
   local result
   local http_code time_total size_download
 
-  # Use curl with resolve to test IP directly
-  result=$(curl --resolve "github.com:443:$ip" \
-    -s -o /dev/null \
-    -w "%{http_code},%{time_total},%{size_download}" \
-    --connect-timeout "${CONNECT_TIMEOUT:-3}" \
-    --max-time "${MAX_TIME:-6}" \
-    "https://github.com/" 2>/dev/null)
+  # Use retry_curl with backoff to handle transient network failures
+  result=$(retry_curl "https://github.com/" "github.com:443:$ip" \
+    "${CONNECT_TIMEOUT:-3}" "${MAX_TIME:-6}")
 
   # Parse curl output: http_code,time_total,size_download
   http_code="${result%%,*}"
@@ -117,19 +113,14 @@ expand_cidrs_to_ips() {
 }
 
 # -----------------------------------------------------------------------------
-# scan_priority_ips - tests all PRIORITY_IPS in parallel
-# Writes results to tmpfile, finds fastest valid IP after all complete
-# Returns 0 if found, 1 if none valid
-# Output format: ip:time:size or empty
+# scan_priority_ips_all - runs all priority IPs in parallel, returns ALL valid results
+# Output: each line "OK:ip:time:size" (sorted by time, fastest first)
+#         Returns 0 if any valid, 1 if none
 # -----------------------------------------------------------------------------
-scan_priority_ips() {
+scan_priority_ips_all() {
   local tmpfile
-  local result
-  local best_result
-  local line
-
   tmpfile=$(mktemp -t goto-github.XXXXXX)
-  # shellcheck disable=SC2064  # We want expansion at definition time, not signal time
+  # shellcheck disable=SC2064
   trap "rm -f '$tmpfile'" EXIT
 
   # Run all priority IPs in parallel
@@ -137,16 +128,13 @@ scan_priority_ips() {
             "${PRIORITY_IPS_4}" "${PRIORITY_IPS_5}" "${PRIORITY_IPS_6}" "${PRIORITY_IPS_7}"; do
     (validate_ip "$ip" >> "$tmpfile") &
   done
-
-  # Wait for all background jobs to complete
   wait
 
-  # Sort by response time (field 3 = time in OK:ip:time:size format)
-  best_result=$(sort -t: -k3 -n "$tmpfile" 2>/dev/null | grep '^OK:' | head -1)
-
-  if [ -n "$best_result" ]; then
-    # Strip "OK:" prefix for output
-    echo "${best_result#OK:}"
+  # Return all valid results sorted by time
+  local count
+  count=$(grep -c '^OK:' "$tmpfile" 2>/dev/null || echo 0)
+  if [ "$count" -gt 0 ]; then
+    sort -t: -k3 -n "$tmpfile" 2>/dev/null | grep '^OK:'
     rm -f "$tmpfile"
     trap - EXIT
     return 0
@@ -154,6 +142,20 @@ scan_priority_ips() {
 
   rm -f "$tmpfile"
   trap - EXIT
+  return 1
+}
+
+# -----------------------------------------------------------------------------
+# scan_priority_ips - tests all PRIORITY_IPS in parallel, returns fastest valid
+# Output format: ip:time:size or empty
+# -----------------------------------------------------------------------------
+scan_priority_ips() {
+  local result
+  result=$(scan_priority_ips_all | head -1)
+  if [ -n "$result" ]; then
+    echo "${result#OK:}"
+    return 0
+  fi
   return 1
 }
 
@@ -279,15 +281,44 @@ except: pass
 
   # Phase 2: Try priority IPs first
   log "scan_all: trying priority IPs"
-  if result=$(scan_priority_ips); then
-    echo "$result"
-    return 0
+  local priority_best="" priority_time=""
+  priority_best=$(scan_priority_ips)
+  if [ -n "$priority_best" ]; then
+    priority_time=$(echo "$priority_best" | cut -d: -f2)
+    log "scan_all: priority IPs fastest: ${priority_time}s"
   fi
 
-  # Phase 3: Fall back to CIDR range scan
-  log "scan_all: priority IPs failed, falling back to CIDR scan"
-  if result=$(scan_cidr_range); then
-    echo "$result"
+  # Phase 3: If priority returned few valid results, extend to CIDR scan
+  local cidr_best="" cidr_time=""
+  local priority_count
+  priority_count=$(scan_priority_ips_all 2>/dev/null | grep -c '^OK:' || echo 0)
+  if [ -z "$priority_best" ] || [ "$priority_count" -lt "${MIN_PRIORITY_HITS:-3}" ]; then
+    log "scan_all: extending to CIDR scan (priority hits=$priority_count < MIN_PRIORITY_HITS=${MIN_PRIORITY_HITS:-3})"
+    if cidr_best=$(scan_cidr_range); then
+      cidr_time=$(echo "$cidr_best" | cut -d: -f2)
+      log "scan_all: CIDR fastest: ${cidr_time}s"
+    fi
+  fi
+
+  # Pick the better of the two
+  local best_result=""
+  if [ -n "$priority_best" ] && [ -n "$cidr_best" ]; then
+    # Both available: pick the faster one
+    if [ "$(echo "$priority_time < $cidr_time" | bc -l 2>/dev/null)" = "1" ]; then
+      best_result="$priority_best"
+      log "scan_all: priority wins (${priority_time}s < ${cidr_time}s)"
+    else
+      best_result="$cidr_best"
+      log "scan_all: CIDR wins (${cidr_time}s <= ${priority_time}s)"
+    fi
+  elif [ -n "$priority_best" ]; then
+    best_result="$priority_best"
+  elif [ -n "$cidr_best" ]; then
+    best_result="$cidr_best"
+  fi
+
+  if [ -n "$best_result" ]; then
+    echo "$best_result"
     return 0
   fi
 

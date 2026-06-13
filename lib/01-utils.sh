@@ -136,3 +136,56 @@ banner() {
   echo "  │ ││_______/|_| \\_\\ /_____/ \\______|_| \\_\\______/ │"
   echo "  └─┘───────────────────────────────────────────────┘"
 }
+
+# ============================================================================
+# Retry curl with linear backoff.
+# Usage: retry_curl <url> <resolve_host> <connect_timeout> <max_time>
+#   resolve_host: e.g. "github.com:443:$ip" or empty
+# Outputs: last non-empty stdout, or empty on all failures
+# Globals used: SCAN_RETRY_COUNT, SCAN_RETRY_DELAY
+# ============================================================================
+retry_curl() {
+  local url="$1"
+  local resolve_host="$2"
+  local connect_timeout="${3:-${CONNECT_TIMEOUT:-3}}"
+  local max_time="${4:-${MAX_TIME:-6}}"
+  local retries="${SCAN_RETRY_COUNT:-2}"
+  local delay="${SCAN_RETRY_DELAY:-1}"
+
+  local resolve_arg=""
+  if [ -n "$resolve_host" ]; then
+    resolve_arg="--resolve $resolve_host"
+  fi
+
+  local result=""
+  local attempt=0
+
+  while [ "$attempt" -le "$retries" ]; do
+    if [ -n "$resolve_arg" ]; then
+      result=$(curl -s -o /dev/null \
+        --resolve "$resolve_host" \
+        -w "%{http_code},%{time_total},%{size_download}" \
+        --connect-timeout "$connect_timeout" \
+        --max-time "$max_time" \
+        "$url" 2>/dev/null)
+    else
+      result=$(curl -s -o /dev/null \
+        -w "%{http_code},%{time_total},%{size_download}" \
+        --connect-timeout "$connect_timeout" \
+        --max-time "$max_time" \
+        "$url" 2>/dev/null)
+    fi
+
+    if [ -n "$result" ]; then
+      echo "$result"
+      return 0
+    fi
+
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$retries" ] && sleep "$delay"
+  done
+
+  # All attempts failed
+  echo ""
+  return 1
+}

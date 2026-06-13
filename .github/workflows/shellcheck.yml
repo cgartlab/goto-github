@@ -19,8 +19,8 @@ permissions:
   contents: read
 
 jobs:
-  shellcheck:
-    name: Shellcheck
+  ci:
+    name: CI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,3 +31,6 @@ jobs:
           severity: warning
           ignore: tests
           additional_files: bin/goto-github.sh
+
+      - name: Run tests
+        run: make test

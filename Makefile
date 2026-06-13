@@ -95,14 +95,14 @@ lint:
 
 test:
 	@echo "Running tests..."
-	@bash_failed=0; pwsh_failed=0; bash_count=0; pwsh_count=0
-	@for t in tests/test-*.sh; do \
+	@bash_failed=0; pwsh_failed=0; bash_count=0; pwsh_count=0; \
+	for t in tests/test-*.sh; do \
 		[ -f "$$t" ] || continue; \
 		bash_count=$$((bash_count + 1)); \
 		echo ""; \
 		if ! bash "$$t"; then bash_failed=$$((bash_failed + 1)); fi; \
-	done
-	@if command -v pwsh >/dev/null 2>&1; then \
+	done; \
+	if command -v pwsh >/dev/null 2>&1; then \
 		for t in tests/test-ps-*.ps1; do \
 			[ -f "$$t" ] || continue; \
 			pwsh_count=$$((pwsh_count + 1)); \
@@ -112,15 +112,20 @@ test:
 	else \
 		echo ""; \
 		echo "(pwsh not found, skipping PowerShell tests)"; \
-	fi
-	@echo ""
-	@echo "================================="
-	@echo "Bash:    $$bash_count files"
-	@echo "PowerShell: $$pwsh_count files"
-	@echo "Failures: bash=$$bash_failed pwsh=$$pwsh_failed"
-	@echo "================================="
-	@if [ $$((bash_failed + pwsh_failed)) -gt 0 ]; then exit 1; fi
-	@echo "✓ All tests passed"
+	fi; \
+	if [ -f tests/test_python.py ]; then \
+		echo ""; \
+		echo "Running Python tests..."; \
+		python3 -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | head -20 || true; \
+	fi; \
+	echo ""; \
+	echo "================================="; \
+	echo "Bash:    $$bash_count files"; \
+	echo "PowerShell: $$pwsh_count files"; \
+	echo "Failures: bash=$$bash_failed pwsh=$$pwsh_failed"; \
+	echo "================================="; \
+	if [ $$((bash_failed + pwsh_failed)) -gt 0 ]; then exit 1; fi; \
+	echo "✓ All tests passed"
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 

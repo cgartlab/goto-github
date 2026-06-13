@@ -36,7 +36,7 @@ jobs:
       - name: Run cloud IP scan
         id: scan
         run: |
-          python3 scripts/cloud-scan.py --output scan-result.json
+          python3 scripts/cloud_scan.py --output scan-result.json
           echo "=== Scan complete ==="
           python3 -c "
 import json
