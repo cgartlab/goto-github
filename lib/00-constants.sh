@@ -17,8 +17,8 @@ readonly INSTALL_DIR
 readonly BIN_DIR="${INSTALL_DIR}/bin"
 readonly LIB_DIR="${INSTALL_DIR}/lib"
 
-# Hosts file
-readonly HOSTS_FILE="/etc/hosts"
+# Hosts file (overridable via env for testing: HOSTS_FILE=/path/to/hosts ./test)
+readonly HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 
 # Markers for hosts file sections
 readonly MARKER_START="# >>> goto-github >>>"
@@ -73,10 +73,18 @@ readonly MAX_TIME=6
 readonly MIN_CONTENT_SIZE=100000
 readonly MIN_CACHE_TTL=300
 
+# Scan retry settings
+readonly SCAN_RETRY_COUNT=2       # max retries per IP (1 try + 2 retries)
+readonly SCAN_RETRY_DELAY=1        # seconds between retries
+
+# Priority scan fallback: extend to CIDR when fewer than this many valid IPs found
+readonly MIN_PRIORITY_HITS=3
+
 # Cloud scan settings (GoToGitHub CDN Scan from GitHub Actions)
-# Gist raw URL for fetching pre-verified GitHub CDN IPs from cloud scan
-# Override via env var: GIST_RAW_URL
-readonly GIST_RAW_URL="${GIST_RAW_URL:-https://gist.githubusercontent.com/cgartlab/goto-github-hosts/raw/goto-github-hosts.json}"
+# Gist raw URL for fetching pre-verified GitHub CDN IPs from cloud scan.
+# Empty default: fork users fall back to local scan until they set GIST_RAW_URL.
+# Override via env var: GIST_RAW_URL=https://gist.githubusercontent.com/<user>/<id>/raw/...
+readonly GIST_RAW_URL="${GIST_RAW_URL:-}"
 readonly CLOUD_CACHE_FILE="$HOME/.goto-github-cloud-cache"
 readonly CLOUD_CACHE_TTL=86400
 

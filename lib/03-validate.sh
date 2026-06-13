@@ -21,7 +21,7 @@ validate_ip_from_validate() {
   [ -z "$ip" ] && return 1
 
   local result
-  result=$(curl --resolve "github.com:443:$ip" -s -o /dev/null -w "%{http_code},%{time_total},%{size_download}" --connect-timeout "$CONNECT_TIMEOUT" --max-time "$MAX_TIME" "https://github.com" 2>/dev/null)
+  result=$(retry_curl "https://github.com" "github.com:443:$ip" "$CONNECT_TIMEOUT" "$MAX_TIME")
 
   [ -z "$result" ] && return 1
 
@@ -61,10 +61,13 @@ validate_ip_quick() {
 
 # ============================================================================
 # Extract IP from the goto-github section in /etc/hosts
+# Usage: extract_ip_from_hosts [file]
+#   file: optional path to hosts file (defaults to HOSTS_FILE)
 # Output: IP address or empty if no valid marker section found
 # Returns: 0
 # ============================================================================
 extract_ip_from_hosts() {
+  local hosts_file="${1:-${HOSTS_FILE}}"
   local line
   local in_section=0
   local ip=""
@@ -81,8 +84,6 @@ extract_ip_from_hosts() {
     esac
 
     if [ "$in_section" -eq 1 ]; then
-      # Extract IP from line like: "140.82.113.3 github.com"
-      # Using awk for portability with Bash 3.2
       local extracted
       extracted=$(echo "$line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^([0-9]+\.){3}[0-9]+$/) { print $i; exit }}')
       if [ -n "$extracted" ]; then
@@ -90,7 +91,7 @@ extract_ip_from_hosts() {
         break
       fi
     fi
-  done < "$HOSTS_FILE"
+  done < "$hosts_file"
 
   echo "$ip"
   return 0
