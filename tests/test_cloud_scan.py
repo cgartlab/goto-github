@@ -5,15 +5,12 @@ Run: python3 tests/test-python.py
        or: make test
 """
 
-import io
 import json
+import os
 import subprocess
 import sys
 import unittest
 from unittest.mock import patch
-
-import sys
-import os
 # Add scripts/ to path so we can import cloud_scan
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import cloud_scan
