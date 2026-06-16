@@ -10,8 +10,9 @@ esac
 readonly _GOTO_GITHUB_04_INCLUDED=1
 
 # ============================================================================
-# Replace the goto-github section in /etc/hosts with new entries.
-# Uses markers $MARKER_START / $MARKER_END to delimit the managed block.
+# Apply single IP to all CORE domains in /etc/hosts
+# DEPRECATED: Use apply_hosts_multi() for multi-group optimization
+# Kept for backward compatibility with cmd_fetch cloud path
 # Usage: apply_hosts <ip>
 # Returns: 0 on success
 # ============================================================================
@@ -81,6 +82,83 @@ apply_hosts() {
 }
 
 # ============================================================================
+# Apply per-domain-group IPs to /etc/hosts
+# Usage: apply_hosts_multi <groups_result_file>
+#   groups_result_file format: "GROUP:IP:TIME:SIZE" lines
+#     DNS_FALLBACK entries are skipped (those groups use normal DNS)
+#   Writes multiple IP lines to /etc/hosts (one IP per domain group)
+# ============================================================================
+apply_hosts_multi() {
+  local groups_file="$1"
+  [ -z "$groups_file" ] && die "apply_hosts_multi: no groups file provided"
+  [ ! -f "$groups_file" ] && die "apply_hosts_multi: groups file not found: $groups_file"
+
+  local tmpblock
+  tmpblock=$(mktemp -t goto-github.XXXXXX)
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmpblock'" EXIT
+
+  {
+    echo "$MARKER_START"
+    echo "# Managed by goto-github — do not edit manually"
+    echo "# Updated at $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# Download acceleration: multi-group IP optimization enabled"
+
+    # Process each group
+    while IFS=: read -r group_name group_ip group_time group_size; do
+      # Skip DNS fallback groups and empty lines
+      [ -z "$group_name" ] && continue
+      [ "$group_ip" = "DNS_FALLBACK" ] && continue
+      [ -z "$group_ip" ] && continue
+
+      # Map group name to domain variable and get domains
+      local domains
+      case "$group_name" in
+        CORE)       domains="$DOMAIN_GROUP_CORE" ;;
+        RAW)        domains="$DOMAIN_GROUP_RAW" ;;
+        CODELOAD)   domains="$DOMAIN_GROUP_CODELOAD" ;;
+        OBJECTS)    domains="$DOMAIN_GROUP_OBJECTS" ;;
+        ASSETS)     domains="$DOMAIN_GROUP_ASSETS" ;;
+        *) continue ;;
+      esac
+
+      if [ -n "$domains" ]; then
+        echo "${group_ip}    ${domains}"
+      fi
+    done < "$groups_file"
+
+    echo "# DNS domains (not pinned): ${DNS_DOMAINS:-none}"
+    echo "$MARKER_END"
+  } > "$tmpblock"
+
+  # Remove existing goto-github block
+  if grep -q "^${MARKER_START}" "$HOSTS_FILE" 2>/dev/null; then
+    log "Replacing existing goto-github block in $HOSTS_FILE with multi-IP config"
+    if is_macos; then
+      sudo sed -i '' "/^${MARKER_START}/,/^${MARKER_END}/d" "$HOSTS_FILE"
+    else
+      sudo sed -i "/^${MARKER_START}/,/^${MARKER_END}/d" "$HOSTS_FILE"
+    fi
+  else
+    log "Adding goto-github multi-IP block to $HOSTS_FILE"
+  fi
+
+  # Append new block
+  {
+    echo ""
+    cat "$tmpblock"
+  } | sudo tee -a "$HOSTS_FILE" >/dev/null
+
+  rm -f "$tmpblock"
+  trap - EXIT
+
+  # Write multi-IP cache
+  write_multi_cache "$groups_file"
+  log "Applied multi-IP hosts to $HOSTS_FILE"
+  return 0
+}
+
+# ============================================================================
 # Flush OS DNS cache after /etc/hosts change.
 # Works on both macOS and Linux.
 # Usage: flush_dns
@@ -122,9 +200,7 @@ verify_hosts() {
   fi
 
   log "Verifying cached IP $current_ip..."
-  local result
-  result=$(validate_ip_quick "$current_ip" 2>/dev/null)
-  if [ $? -eq 0 ]; then
+  if validate_ip_quick "$current_ip" 2>/dev/null; then
     log "verify_hosts: IP $current_ip is working"
     return 0
   fi
@@ -142,7 +218,43 @@ show_status() {
   echo "=== GoToGitHub Status ==="
   echo ""
 
-  # Check if we have cloud-sourced data
+  # Try to show per-group IPs from cache
+  if [ -f "$CACHE_FILE" ]; then
+    local has_multi_cache=0
+    while IFS=: read -r domain ip time size; do
+      [ -z "$domain" ] && continue
+      has_multi_cache=1
+      local domain_status="?"
+      if validate_ip_quick_for_domain "$ip" "$domain" 2>/dev/null; then
+        domain_status="OK"
+      else
+        domain_status="FAIL"
+      fi
+      printf "  %-45s %-16s %s\n" "$domain" "$ip" "$domain_status"
+    done < "$CACHE_FILE"
+
+    if [ "$has_multi_cache" -eq 1 ]; then
+      echo ""
+    fi
+  fi
+
+  # Also show the /etc/hosts applied IP (first one found)
+  local current_ip
+  current_ip=$(extract_ip_from_hosts 2>/dev/null)
+  if [ -n "$current_ip" ]; then
+    echo "  Current /etc/hosts primary IP: $current_ip"
+    if validate_ip_quick "$current_ip" 2>/dev/null; then
+      echo "  Status:     OK (reachable)"
+    else
+      echo "  Status:     FAILED (not reachable)"
+    fi
+  else
+    echo "  Current IP: (none)"
+    echo "  Status:     Not installed"
+  fi
+  echo ""
+
+  # Cloud scan info
   local cloud_source="(none)"
   if [ -f "$CLOUD_CACHE_FILE" ]; then
     cloud_source=$(head -1 "$CLOUD_CACHE_FILE" | python3 -c "
@@ -154,33 +266,6 @@ except:
     print('(stale)')
 " 2>/dev/null || echo "(stale)")
   fi
-
-  local current_ip
-  current_ip=$(extract_ip_from_hosts 2>/dev/null)
-  if [ -n "$current_ip" ]; then
-    echo "  Current IP: $current_ip"
-
-    local result
-    result=$(validate_ip_quick "$current_ip" 2>/dev/null)
-    if [ $? -eq 0 ]; then
-      echo "  Status:     OK (reachable)"
-    else
-      echo "  Status:     FAILED (not reachable)"
-    fi
-  else
-    echo "  Current IP: (none)"
-    echo "  Status:     Not installed"
-  fi
-  echo ""
-
-  local cached_ip
-  cached_ip=$(read_cache "$CACHE_FILE")
-  if [ -n "$cached_ip" ]; then
-    echo "  Cached IP:  $cached_ip"
-  else
-    echo "  Cached IP:  (none)"
-  fi
-
   echo "  Cloud scan: $cloud_source"
   echo ""
   echo "  Hosts file: $HOSTS_FILE"

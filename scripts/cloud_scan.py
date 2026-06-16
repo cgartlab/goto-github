@@ -41,20 +41,31 @@ CORE_DOMAINS = [
     "github.com", "www.github.com", "gist.github.com",
     "alive.github.com", "live.github.com", "central.github.com",
     "collector.github.com", "github.community",
+    "desktop.github.com", "education.github.com", "status.github.com",
+    "docs.github.com", "cli.github.com", "copilot.github.com",
+    "login.github.com", "partner.github.com",
 ]
 
-ALL_DOMAINS = [
-    "github.com", "www.github.com", "gist.github.com", "api.github.com",
-    "codeload.github.com", "raw.githubusercontent.com", "avatars.githubusercontent.com",
-    "github.githubassets.com", "collector.github.com", "central.github.com",
-    "desktop.github.com", "education.github.com", "partner.github.com",
-    "status.github.com", "docs.github.com", "cli.github.com",
-    "copilot.github.com", "login.github.com", "github.community",
+DOWNLOAD_DOMAINS = [
+    "raw.githubusercontent.com",
+    "codeload.github.com",
     "objects.githubusercontent.com",
 ]
 
+ASSET_DOMAINS = [
+    "github.githubassets.com",
+    "avatars.githubusercontent.com",
+]
+
 # 应走 DNS 解析的域名（不适合 fixed hosts IP）
-DNS_ONLY_DOMAINS = {"api.github.com"}
+DNS_ONLY_DOMAINS = {"api.github.com", "pipelines.actions.githubusercontent.com"}
+
+ALL_DOMAINS = (
+    CORE_DOMAINS +
+    DOWNLOAD_DOMAINS +
+    ASSET_DOMAINS +
+    list(DNS_ONLY_DOMAINS)
+)
 
 CONNECT_TIMEOUT = 3
 MAX_TIME = 6
@@ -289,6 +300,12 @@ def generate_json_output(best_ips, domain_tests):
         "meta": {
             "total_ips_tested": len(best_ips),
             "total_domains": len(ALL_DOMAINS),
+            "domain_groups": {
+                "core": len(CORE_DOMAINS),
+                "download": len(DOWNLOAD_DOMAINS),
+                "assets": len(ASSET_DOMAINS),
+                "dns_only": len(DNS_ONLY_DOMAINS),
+            }
         }
     }
 

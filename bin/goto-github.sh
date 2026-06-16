@@ -55,37 +55,87 @@ check_deps curl
 # ============================================================================
 cmd_run() {
   check_sudo
-  echo "GoToGitHub: scanning for best GitHub IP..."
+  echo "GoToGitHub: scanning for best GitHub IPs..."
   echo ""
 
-  local scan_result
-  if scan_result=$(scan_all); then
-    local best_ip response_time content_size
-    best_ip=$(echo "$scan_result" | cut -d: -f1)
-    response_time=$(echo "$scan_result" | cut -d: -f2)
-    content_size=$(echo "$scan_result" | cut -d: -f3)
+  # Phase 1: Try cloud-sourced IPs from GitHub Actions (fastest, most reliable)
+  # Cloud fetch returns JSON with per-domain best IPs
+  if declare -f fetch_cloud_ips >/dev/null 2>&1; then
+    local cloud_json
+    cloud_json=$(fetch_cloud_ips 2>/dev/null)
+    if [ -n "$cloud_json" ]; then
+      local hosts_block
+      hosts_block=$(extract_hosts_block "$cloud_json" 2>/dev/null)
+      if [ -n "$hosts_block" ]; then
+        echo "  Cloud source: available"
+        apply_cloud_hosts "$cloud_json" || {
+          echo "  Cloud apply failed, falling back to local scan..."
+        }
+        write_cloud_cache "$cloud_json"
+        flush_dns
 
-    echo "  Best IP:   $best_ip"
-    echo "  Response:  ${response_time}s"
-    echo "  Content:   $((content_size / 1024))KB"
-    echo ""
-
-    apply_hosts "$best_ip" || die "Failed to apply hosts"
-    flush_dns
-
-    echo ""
-    echo "Done. github.com should now be reachable directly."
-    echo "Try: curl -sI https://github.com/ | head -5"
-  else
-    echo "ERROR: No working GitHub IP found."
-    echo "Possible causes:"
-    echo "  - Your network is blocking all HTTPS outbound"
-    echo "  - The GFW is actively blocking all CDN IPs"
-    echo "  - DNS resolution for api.github.com is failing"
-    echo ""
-    echo "Try running again in a few minutes, or check your internet connection."
-    return 1
+        echo ""
+        echo "Done. All GitHub domains configured with cloud-verified IPs."
+        echo "Run 'goto-github status' for details."
+        return 0
+      fi
+    fi
   fi
+
+  echo "  Cloud source: unavailable"
+  echo "  Running local scan..."
+  echo ""
+
+  # Phase 2: Local multi-group scan
+  local valid_ips_file=""
+  if valid_ips_file=$(get_valid_ips_file 2>/dev/null); then
+    # Got valid IPs — now scan per domain group
+    local groups_result=""
+    groups_result=$(scan_all_groups "$valid_ips_file" 2>/dev/null)
+
+    # Clean up temp file
+    rm -f "$valid_ips_file" 2>/dev/null || true
+
+    if [ -n "$groups_result" ]; then
+      echo "  Per-group scan complete:"
+      echo ""
+
+      # Show summary of each group's result
+      while IFS=: read -r group group_ip group_time group_size; do
+        case "$group_ip" in
+          DNS_FALLBACK) echo "  - ${group}:     DNS (no pin available)" ;;
+          "") ;;
+          *) echo "  - ${group}:    ${group_ip} (${group_time}s)" ;;
+        esac
+      done <<< "$groups_result"
+      echo ""
+
+      local tmp_groups
+      tmp_groups=$(mktemp)
+      trap 'rm -f "$tmp_groups"' RETURN
+      printf "%s" "$groups_result" > "$tmp_groups"
+      apply_hosts_multi "$tmp_groups" || {
+        echo "ERROR: Failed to apply hosts"
+        return 1
+      }
+      flush_dns
+
+      echo ""
+      echo "Done. GitHub domains are now optimized with per-group IPs."
+      echo "Run 'goto-github status' for details."
+      return 0
+    fi
+    rm -f "$valid_ips_file" 2>/dev/null || true
+  fi
+
+  echo "ERROR: No working GitHub IP found."
+  echo "Possible causes:"
+  echo "  - Your network is blocking all HTTPS outbound"
+  echo "  - The GFW is actively blocking all CDN IPs"
+  echo "  - DNS resolution for api.github.com is failing"
+  echo ""
+  echo "Try running again in a few minutes, or check your internet connection."
+  return 1
 }
 
 # ============================================================================

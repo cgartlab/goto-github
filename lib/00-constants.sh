@@ -24,8 +24,8 @@ readonly HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 readonly MARKER_START="# >>> goto-github >>>"
 readonly MARKER_END="# <<< goto-github <<<"
 
-# Cache file (last working IP)
-readonly CACHE_FILE="$HOME/.goto-github-cache"
+# Cache file (last working IP, overridable via CACHE_FILE env var)
+readonly CACHE_FILE="${CACHE_FILE:-${HOME}/.goto-github-cache}"
 
 # Log file (platform-specific path)
 if [ "$(uname)" = "Darwin" ]; then
@@ -66,6 +66,28 @@ readonly CORE_DOMAINS_5="central.github.com"
 readonly CORE_DOMAINS_6="collector.github.com"
 readonly CORE_DOMAINS_7="github.community"
 
+# ── Domain groups for download acceleration ──────────────────────────────
+# Each group gets its own optimal IP
+
+readonly DOMAIN_GROUP_CORE="github.com www.github.com gist.github.com alive.github.com live.github.com central.github.com collector.github.com github.community desktop.github.com education.github.com status.github.com docs.github.com cli.github.com copilot.github.com login.github.com partner.github.com"
+
+readonly DOMAIN_GROUP_RAW="raw.githubusercontent.com"
+
+readonly DOMAIN_GROUP_CODELOAD="codeload.github.com"
+
+readonly DOMAIN_GROUP_OBJECTS="objects.githubusercontent.com"
+
+readonly DOMAIN_GROUP_ASSETS="github.githubassets.com avatars.githubusercontent.com"
+
+# All domains that go into /etc/hosts (space-separated)
+readonly ALL_HOSTS_DOMAINS="$DOMAIN_GROUP_CORE $DOMAIN_GROUP_RAW $DOMAIN_GROUP_CODELOAD $DOMAIN_GROUP_OBJECTS $DOMAIN_GROUP_ASSETS"
+
+# DNS-only domains (NOT pinned to /etc/hosts — they return 400 when pinned)
+readonly DNS_DOMAINS="api.github.com pipelines.actions.githubusercontent.com"
+
+# Domain group names for iteration (space-separated)
+readonly DOMAIN_GROUP_NAMES="CORE RAW CODELOAD OBJECTS ASSETS"
+
 # curl settings
 readonly CONCURRENT_BATCH=100
 readonly CONNECT_TIMEOUT=3
@@ -87,7 +109,3 @@ readonly MIN_PRIORITY_HITS=3
 readonly GIST_RAW_URL="${GIST_RAW_URL:-}"
 readonly CLOUD_CACHE_FILE="$HOME/.goto-github-cloud-cache"
 readonly CLOUD_CACHE_TTL=86400
-
-# Domains that should NOT be added to /etc/hosts (GFW intercepts their IPs)
-# These domains resolve fine via DNS but return 400 when pinned to CDN IPs
-readonly DNS_DOMAINS="api.github.com"
