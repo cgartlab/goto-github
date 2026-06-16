@@ -44,8 +44,8 @@ validate_ip_for_scan() {
 validate_ip() {
   local ip="$1"
 
-  # Check if validate_ip from lib/03-validate.sh exists (function defined)
-  if declare -f validate_ip_from_validate >/dev/null 2>&1; then
+  # Check if lib/03-validate.sh was loaded via guard variable
+  if [ "${_GOTO_GITHUB_03_INCLUDED:-0}" -eq 1 ]; then
     validate_ip_from_validate "$ip"
   else
     validate_ip_for_scan "$ip"
@@ -64,7 +64,7 @@ validate_ip_for_domain() {
   local result
   local http_code time_total size_download
 
-  result=$(retry_curl "https://${domain}/" "github.com:443:${ip}" \
+  result=$(retry_curl "https://${domain}/" "${domain}:443:${ip}" \
     "${CONNECT_TIMEOUT:-3}" "${MAX_TIME:-6}")
 
   http_code="${result%%,*}"
@@ -271,30 +271,14 @@ scan_all() {
     local cloud_json best_ip best_time best_size
     cloud_json=$(fetch_cloud_ips 2>/dev/null)
     if [ -n "$cloud_json" ]; then
-      best_ip=$(echo "$cloud_json" | python3 -c "
+      IFS='|' read -r best_ip best_time best_size <<< "$(echo "$cloud_json" | python3 -c "
 import json,sys
 try:
     d=json.load(sys.stdin)
     s=d.get('servers',{}).get('github.com',{})
-    print(s.get('best_ip',''))
+    print(s.get('best_ip','') + '|' + str(s.get('best_time','0')) + '|' + str(s.get('best_size','100000')))
 except: pass
-" 2>/dev/null)
-      best_time=$(echo "$cloud_json" | python3 -c "
-import json,sys
-try:
-    d=json.load(sys.stdin)
-    s=d.get('servers',{}).get('github.com',{})
-    print(s.get('best_time','0'))
-except: pass
-" 2>/dev/null)
-      best_size=$(echo "$cloud_json" | python3 -c "
-import json,sys
-try:
-    d=json.load(sys.stdin)
-    s=d.get('servers',{}).get('github.com',{})
-    print(s.get('best_size','100000'))
-except: pass
-" 2>/dev/null)
+" 2>/dev/null)"
 
       if [ -n "$best_ip" ]; then
         log "scan_all: cloud fetch successful (best IP: $best_ip)"

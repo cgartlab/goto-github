@@ -249,7 +249,7 @@ def generate_hosts_block(best_ips, domain_tests):
     lines.append(f"# Source: GitHub Actions cloud scan")
 
     # Group domains by their best-performing IP
-    if domain_tests.get("github.com"):
+    if ip_groups:
         for ip, domains in sorted(ip_groups.items()):
             lines.append(f"{ip:15} {' '.join(domains)}")
 

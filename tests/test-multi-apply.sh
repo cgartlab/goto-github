@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
 # test-multi-apply.sh
-# Validates apply_hosts_multi function in lib/04-apply.sh
+# Validates apply_hosts_multi output format (hosts block structure)
 # Run: bash tests/test-multi-apply.sh
+#
+# Note: apply_hosts_multi requires sudo for /etc/hosts writes, so this test
+# validates the output format by generating the expected block directly
+# using the same logic as the function body.
 # ============================================================================
 
 set -euo pipefail
@@ -29,25 +33,38 @@ else
   fail "apply_hosts_multi is not defined"
 fi
 
-# Build a self-contained test script that mimics apply_hosts_multi output
+# Create temp files
 tmp_hosts=$(mktemp)
 echo "127.0.0.1 localhost" > "$tmp_hosts"
 
-cat > "$tmp_hosts.script" << 'PYEOF'
-#!/usr/bin/env bash
-set -eo pipefail
-TARGET_HOSTS="$1"
-groups_file="$2"
-MARKER_START="# >>> goto-github >>>"
-MARKER_END="# <<< goto-github <<<"
-DOMAIN_GROUP_CORE="github.com www.github.com gist.github.com alive.github.com live.github.com central.github.com collector.github.com github.community desktop.github.com education.github.com status.github.com docs.github.com cli.github.com copilot.github.com login.github.com partner.github.com"
-DOMAIN_GROUP_RAW="raw.githubusercontent.com"
-DOMAIN_GROUP_CODELOAD="codeload.github.com"
-DOMAIN_GROUP_OBJECTS="objects.githubusercontent.com"
-DOMAIN_GROUP_ASSETS="github.githubassets.com avatars.githubusercontent.com"
-DNS_DOMAINS="api.github.com pipelines.actions.githubusercontent.com"
+tmp_groups=$(mktemp)
+cat > "$tmp_groups" << 'EOF'
+CORE:140.82.112.3:0.234:102400
+RAW:185.199.108.153:0.456:204800
+CODELOAD:185.199.111.1:0.389:204800
+OBJECTS:140.82.114.4:0.512:102400
+ASSETS:185.199.109.1:0.345:102400
+EOF
 
-{
+tmp_script=$(mktemp)
+
+# Use Python to generate the test script with correct paths substituted
+# This avoids all shell variable expansion issues with heredocs
+export PROJECT_ROOT="$PROJECT_ROOT" SCRIPT_PATH="$tmp_script" TMP_HOSTS="$tmp_hosts" TMP_GROUPS="$tmp_groups"
+python3 - << 'PYEOF'
+import os
+import sys
+
+project_root = os.environ['PROJECT_ROOT']
+
+with open(os.environ['SCRIPT_PATH'], 'w') as f:
+    f.write(f'''#!/usr/bin/env bash
+set -eo pipefail
+TARGET_HOSTS="{os.environ['TMP_HOSTS']}"
+
+. "{project_root}/lib/00-constants.sh"
+
+{{
   echo ""
   echo "$MARKER_START"
   echo "# Managed by goto-github — do not edit manually"
@@ -70,34 +87,25 @@ DNS_DOMAINS="api.github.com pipelines.actions.githubusercontent.com"
     esac
 
     if [ -n "$domains" ]; then
-      echo "${group_ip}    ${domains}"
+      echo "${{group_ip}}    ${{domains}}"
     fi
-  done < "$groups_file"
+  done < "{os.environ['TMP_GROUPS']}"
 
-  echo "# DNS domains (not pinned): ${DNS_DOMAINS:-none}"
+  echo "# DNS domains (not pinned): ${{DNS_DOMAINS:-none}}"
   echo "$MARKER_END"
-} >> "$TARGET_HOSTS"
+}} >> "$TARGET_HOSTS"
+''')
 PYEOF
-chmod +x "$tmp_hosts.script"
 
-# Create groups file
-tmp_groups=$(mktemp)
-cat > "$tmp_groups" << 'EOF'
-CORE:140.82.112.3:0.234:102400
-RAW:185.199.108.153:0.456:204800
-CODELOAD:185.199.111.1:0.389:204800
-OBJECTS:140.82.114.4:0.512:102400
-ASSETS:185.199.109.1:0.345:102400
-EOF
-
-bash "$tmp_hosts.script" "$tmp_hosts" "$tmp_groups" 2>&1 || true
+chmod +x "$tmp_script"
+export TMP_HOSTS="$tmp_hosts" TMP_GROUPS="$tmp_groups" SCRIPT_PATH="$tmp_script"
+bash "$tmp_script" 2>&1 || true
 content=$(cat "$tmp_hosts")
 
-# Verify markers
 grep -Fq "$MARKER_START" <<< "$content" && pass "Start marker present" || fail "Start marker missing"
 grep -Fq "$MARKER_END" <<< "$content" && pass "End marker present" || fail "End marker missing"
 
-# Verify multi-group IPs (note: echo uses 4 spaces between IP and domains)
+# Verify multi-group IPs (echo uses 4 spaces between IP and domains)
 grep -Fq "140.82.112.3    github.com" <<< "$content" && pass "CORE IP maps github.com" || fail "CORE IP missing github.com"
 grep -Fq "185.199.108.153    raw.githubusercontent.com" <<< "$content" && pass "RAW IP maps raw.githubusercontent.com" || fail "RAW IP missing raw.githubusercontent.com"
 grep -Fq "185.199.111.1    codeload.github.com" <<< "$content" && pass "CODELOAD IP maps codeload.github.com" || fail "CODELOAD IP missing codeload.github.com"
@@ -109,7 +117,7 @@ grep -Fq "DNS domains (not pinned):" <<< "$content" && pass "DNS domains comment
 grep -Fq "api.github.com" <<< "$content" && pass "api.github.com in DNS comment" || fail "api.github.com missing from DNS comment"
 grep -Fq "pipelines.actions.githubusercontent.com" <<< "$content" && pass "pipelines.actions.githubusercontent.com in DNS comment" || fail "pipelines.actions.githubusercontent.com missing from DNS comment"
 
-# Verify DNS domains are NOT mapped (not in hosts lines)
+# Verify DNS domains are NOT mapped
 if grep '^140.82.112.3.*api.github.com' <<< "$content" >/dev/null; then
   fail "api.github.com should NOT be in hosts lines"
 else
@@ -127,11 +135,14 @@ grep -Fq "multi-group IP optimization enabled" <<< "$content" && pass "Multi-gro
 
 # Test DNS_FALLBACK is skipped
 echo "CORE:DNS_FALLBACK:::" >> "$tmp_groups"
-bash "$tmp_hosts.script" "$tmp_hosts" "$tmp_groups" 2>&1 || true
+GROUPS_FILE="$tmp_groups" TMP_HOSTS="$tmp_hosts" TMP_GROUPS="$tmp_groups" \
+  SCRIPT_PATH="$tmp_script" \
+  PROJECT_ROOT="$PROJECT_ROOT" \
+  bash "$tmp_script" 2>&1 || true
 content=$(cat "$tmp_hosts")
 grep -q "DNS_FALLBACK" <<< "$content" && fail "DNS_FALLBACK should be skipped" || pass "DNS_FALLBACK entries skipped correctly"
 
-rm -f "$tmp_hosts" "$tmp_hosts.script" "$tmp_groups"
+rm -f "$tmp_hosts" "$tmp_groups" "$tmp_script"
 
 echo ""
 echo "Results: $passed passed, $failed failed"

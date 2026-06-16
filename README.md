@@ -18,13 +18,16 @@ GitHub IP 扫描与 hosts 配置工具。
 git clone https://github.com/cgartlab/goto-github.git
 cd goto-github
 
-# 扫描并配置（包括下载加速）
+# 快速路径：使用云端预验证 IP（推荐，无需本地扫描）
+sudo ./bin/goto-github.sh fetch
+
+# 本地扫描：为每个域名组寻找最优 IP
 sudo ./bin/goto-github.sh run
 
 # 查看各域名组分配状态
-sudo ./bin/goto-github.sh status
+goto-github status
 
-# 安装定时任务
+# 安装定时任务（每 3 小时自动更新）
 sudo ./bin/goto-github.sh install
 ```
 
@@ -32,10 +35,20 @@ sudo ./bin/goto-github.sh install
 
 | 命令 | 说明 |
 |------|------|
-| `goto-github run` | 扫描 IP 并更新 hosts |
-| `goto-github status` | 查看当前状态 |
-| `goto-github install` | 安装定时任务 |
+| `goto-github run` | 扫描 IP 并为每个域名组更新 hosts（本地扫描） |
+| `goto-github fetch` | 快速路径：从 GitHub Actions 云端获取预验证 IP（推荐优先） |
+| `goto-github status` | 查看当前各域名组 IP 分配状态 |
+| `goto-github install` | 安装定时任务（每 3 小时自动更新） |
 | `goto-github uninstall` | 卸载所有组件 |
+
+## DNS-only 域名
+
+以下域名**不写入 hosts**，保持正常 DNS 解析：
+
+| 域名 | 原因 |
+|------|------|
+| `api.github.com` | CDN 路由不同，pin 到固定 IP 返回 400 |
+| `pipelines.actions.githubusercontent.com` | GitHub Actions 基础设施，非公共 CDN |
 
 ## 原理
 
@@ -48,7 +61,7 @@ sudo ./bin/goto-github.sh install
 
 | 组 | 域名 | 用途 |
 |----|------|------|
-| CORE | github.com, www.github.com, ... | 核心网页浏览 |
+| CORE | github.com, www.github.com, gist.github.com 等 16 个 | 核心网页浏览 |
 | RAW | raw.githubusercontent.com | raw 文件下载 |
 | CODELOAD | codeload.github.com | 仓库归档下载 (tar.gz/zip) |
 | OBJECTS | objects.githubusercontent.com | Release 附件 / LFS |
