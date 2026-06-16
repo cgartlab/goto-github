@@ -4,6 +4,16 @@
 # interference) and publishes the authoritative host configuration to a Gist.
 # Local clients fetch this Gist for near-instant hosts configuration.
 #
+# Prerequisites — Repository Secrets:
+#   GIST_TOKEN   (required) — A GitHub Personal Access Token (classic) with
+#                 the `gist` scope. Create one at:
+#                   https://github.com/settings/tokens
+#                 GITHUB_TOKEN cannot create/update gists because 'gist' is
+#                 not a supported permission scope for GitHub Actions tokens.
+#   GIST_ID      (optional) — If you already have a Gist you want to update,
+#                 set this to its ID (e.g. "1a2b3c4d5e6f7g8h9i0j"). When
+#                 omitted, a new public Gist will be created automatically.
+#
 # Free tier note: Public repo Actions minutes are free. Schedule is set to
 # every 12h (~60 runs/month, ~2-3 min each) to stay well under any limits.
 # ============================================================================
@@ -47,7 +57,7 @@ print(f'Servers configured: {len(d[\"servers\"])}')
 
       - name: Update Gist with scan results
         env:
-          GH_TOKEN: ${{ secrets.GIST_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
           GIST_ID: ${{ secrets.GIST_ID }}
         run: |
           if [ -z "$GIST_ID" ]; then
@@ -55,14 +65,26 @@ print(f'Servers configured: {len(d[\"servers\"])}')
             GIST_URL=$(gh gist create scan-result.json \
               --filename "goto-github-hosts.json" \
               --description "GoToGitHub — Live GitHub CDN IP scan results" \
-              --public 2>&1)
+              --public 2>&1) || {
+              echo "::error::gh gist create FAILED."
+              echo "::error::Make sure the GIST_TOKEN secret is set in your repo."
+              echo "::error::  1. Create a classic PAT with 'gist' scope:"
+              echo "::error::     https://github.com/settings/tokens"
+              echo "::error::  2. Add it as a repository secret named GIST_TOKEN:"
+              echo "::error::     https://github.com/${{ github.repository }}/settings/secrets/actions"
+              echo "::error::  3. Rerun this workflow."
+              echo "Raw output: $GIST_URL"
+              exit 1
+            }
             GIST_ID=$(echo "$GIST_URL" | awk -F/ '{print $NF}')
             echo "=== NEW GIST CREATED ==="
             echo "Gist URL: $GIST_URL"
             echo "GIST_ID: $GIST_ID"
             echo ""
-            echo "IMPORTANT: Add this GIST_ID to your repo secrets!"
+            echo "IMPORTANT: Add this GIST_ID to your repo secrets to"
+            echo "update this same Gist on future runs:"
             echo "  gh secret set GIST_ID --body \"$GIST_ID\""
+            echo "  (or add it at https://github.com/${{ github.repository }}/settings/secrets/actions)"
           else
             echo "Updating existing Gist: $GIST_ID"
             gh gist edit "$GIST_ID" \

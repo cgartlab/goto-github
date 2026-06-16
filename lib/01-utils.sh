@@ -81,7 +81,7 @@ is_linux() {
 check_sudo() {
   if ! sudo -n true 2>/dev/null; then
     echo "This command requires sudo access to modify /etc/hosts."
-    if sudo -v; then
+    if sudo -n true; then
       echo "Authorization granted."
     else
       die "sudo authentication failed"
