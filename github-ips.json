@@ -1,0 +1,17 @@
+{
+  "updated_at": "2026-06-16T00:00:00+00:00",
+  "github_actions_run": "initial",
+  "servers": {
+    "github.com": {"mode": "hosts", "best_ip": "140.82.114.3", "best_time": 0.5, "best_size": 150000},
+    "www.github.com": {"mode": "hosts", "best_ip": "140.82.114.3", "best_time": 0.5, "best_size": 150000},
+    "gist.github.com": {"mode": "hosts", "best_ip": "140.82.114.3", "best_time": 0.5, "best_size": 150000},
+    "raw.githubusercontent.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.8, "best_size": 5000},
+    "codeload.github.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 1.2, "best_size": 5000},
+    "objects.githubusercontent.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.9, "best_size": 5000},
+    "github.githubassets.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.7, "best_size": 5000},
+    "avatars.githubusercontent.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.6, "best_size": 5000},
+    "api.github.com": {"mode": "dns", "best_ip": null},
+    "pipelines.actions.githubusercontent.com": {"mode": "dns", "best_ip": null}
+  },
+  "hosts_block": "# >>> goto-github >>>\n# Initial stub — will be updated by cloud scan\n# <<< goto-github <<<"
+}

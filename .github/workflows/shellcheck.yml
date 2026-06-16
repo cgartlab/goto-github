@@ -5,15 +5,13 @@ on:
   push:
     branches: [main, dev-*]
     paths:
-      - 'bin/**'
-      - 'lib/**'
-      - 'Makefile'
+      - 'fetch.sh'
+      - 'scripts/**/*.sh'
   pull_request:
     branches: [main]
     paths:
-      - 'bin/**'
-      - 'lib/**'
-      - 'Makefile'
+      - 'fetch.sh'
+      - 'scripts/**/*.sh'
 
 permissions:
   contents: read
@@ -29,8 +27,4 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           severity: warning
-          ignore: tests
-          additional_files: bin/goto-github.sh
-
-      - name: Run tests
-        run: make test
+          additional_files: fetch.sh
