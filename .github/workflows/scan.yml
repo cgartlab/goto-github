@@ -1,0 +1,54 @@
+# GoToGitHub CDN IP Scan — commits results directly to the repository
+# =====================================================================
+# Runs on a schedule and on demand. Scans GitHub CDN IPs, validates them,
+# and commits the result file (github-ips.json) directly to the repo using
+# GITHUB_TOKEN. The [skip ci] marker prevents re-triggering the workflow.
+# =====================================================================
+name: CDN IP Scan
+
+on:
+  schedule:
+    # Every 3 hours
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+    # Allow manual trigger from the Actions tab
+
+permissions:
+  contents: write  # Required to push commits
+
+jobs:
+  scan-and-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for git commit
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run CDN IP scan
+        run: |
+          python3 scripts/scan.py --output github-ips.json || {
+            echo "::error::CDN IP scan failed"
+            exit 1
+          }
+          echo "=== Scan complete ==="
+          wc -l github-ips.json
+
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add github-ips.json
+          git diff --staged --quiet && {
+            echo "No changes to commit — scan results are identical."
+            exit 0
+          }
+          git commit -m "chore: update GitHub CDN IPs [skip ci]"
+          git push
+          echo "=== Changes committed and pushed ==="
