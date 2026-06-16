@@ -57,15 +57,15 @@ ASSET_DOMAINS = [
     "avatars.githubusercontent.com",
 ]
 
+# 应走 DNS 解析的域名（不适合 fixed hosts IP）
+DNS_ONLY_DOMAINS = {"api.github.com", "pipelines.actions.githubusercontent.com"}
+
 ALL_DOMAINS = (
     CORE_DOMAINS +
     DOWNLOAD_DOMAINS +
     ASSET_DOMAINS +
     list(DNS_ONLY_DOMAINS)
 )
-
-# 应走 DNS 解析的域名（不适合 fixed hosts IP）
-DNS_ONLY_DOMAINS = {"api.github.com", "pipelines.actions.githubusercontent.com"}
 
 CONNECT_TIMEOUT = 3
 MAX_TIME = 6

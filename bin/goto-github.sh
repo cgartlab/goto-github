@@ -110,7 +110,11 @@ cmd_run() {
       done <<< "$groups_result"
       echo ""
 
-      apply_hosts_multi <<< "$groups_result" || {
+      local tmp_groups
+      tmp_groups=$(mktemp)
+      trap 'rm -f "$tmp_groups"' RETURN
+      printf "%s" "$groups_result" > "$tmp_groups"
+      apply_hosts_multi "$tmp_groups" || {
         echo "ERROR: Failed to apply hosts"
         return 1
       }
