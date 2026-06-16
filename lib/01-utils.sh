@@ -189,3 +189,74 @@ retry_curl() {
   echo ""
   return 1
 }
+
+# ============================================================================
+# Write multi-IP cache (for per-domain-group optimization)
+# Usage: write_multi_cache <groups_result_file> [cache_file]
+#   groups_result_file format: "GROUP:IP:TIME:SIZE" lines (DNS_FALLBACK lines skipped)
+#   cache_file: optional, defaults to CACHE_FILE
+# Cache file format: "domain:ip:time:size" one per line
+# ============================================================================
+write_multi_cache() {
+  local groups_file="$1"
+  local cache_file="${2:-${CACHE_FILE}}"
+  [ -z "$groups_file" ] || [ ! -f "$groups_file" ] && return 1
+  [ -z "$cache_file" ] && return 1
+
+  local cache_content=""
+  local domain_var=""
+
+  while IFS=: read -r group_name group_ip group_time group_size; do
+    # Skip DNS fallback entries and empty lines
+    [ "$group_ip" = "DNS_FALLBACK" ] && continue
+    [ -z "$group_ip" ] && continue
+
+    # Map group name to representative domain
+    case "$group_name" in
+      CORE)       domain_var="DOMAIN_GROUP_CORE" ;;
+      RAW)        domain_var="DOMAIN_GROUP_RAW" ;;
+      CODELOAD)   domain_var="DOMAIN_GROUP_CODELOAD" ;;
+      OBJECTS)    domain_var="DOMAIN_GROUP_OBJECTS" ;;
+      ASSETS)     domain_var="DOMAIN_GROUP_ASSETS" ;;
+      *) continue ;;
+    esac
+
+    # shellcheck disable=SC2086
+    local domains="${!domain_var}"
+    local first_domain="${domains%% *}"
+
+    if [ -n "$first_domain" ]; then
+      cache_content="${cache_content}${first_domain}:${group_ip}:${group_time:-0}:${group_size:-0}"$'\n'
+    fi
+  done < "$groups_file"
+
+  if [ -n "$cache_content" ]; then
+    printf "%s" "$cache_content" > "$cache_file" 2>/dev/null || return 1
+  fi
+  return 0
+}
+
+# ============================================================================
+# Read multi-IP cache and print as shell variable assignments
+# Usage: read_multi_cache [cache_file]
+#   cache_file: optional, defaults to CACHE_FILE
+# Output: "GROUP_IP='ip'; GROUP_TIME='time'; ..." for each group
+# Returns: 0 if cache exists and readable, 1 otherwise
+# ============================================================================
+read_multi_cache() {
+  local cache_file="${1:-${CACHE_FILE}}"
+  [ -z "$cache_file" ] && return 1
+  [ ! -f "$cache_file" ] && return 1
+
+  while IFS=: read -r domain ip time size; do
+    [ -z "$domain" ] && continue
+    case "$domain" in
+      github.com)          echo "CORE_IP='$ip'; CORE_TIME='$time'; CORE_SIZE='$size';" ;;
+      raw.githubusercontent.com)  echo "RAW_IP='$ip'; RAW_TIME='$time'; RAW_SIZE='$size';" ;;
+      codeload.github.com)  echo "CODELOAD_IP='$ip'; CODELOAD_TIME='$time'; CODELOAD_SIZE='$size';" ;;
+      objects.githubusercontent.com) echo "OBJECTS_IP='$ip'; OBJECTS_TIME='$time'; OBJECTS_SIZE='$size';" ;;
+      github.githubassets.com) echo "ASSETS_IP='$ip'; ASSETS_TIME='$time'; ASSETS_SIZE='$size';" ;;
+    esac
+  done < "$cache_file"
+  return 0
+}
