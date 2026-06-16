@@ -24,8 +24,6 @@ jobs:
       issues: write
       pull-requests: write
       metadata: read
-      workflows: write
-      statuses: write
       checks: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
