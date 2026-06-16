@@ -1,101 +1,101 @@
 {
-  "updated_at": "2026-06-16T20:54:41.204768+00:00",
-  "github_actions_run": "27647492242",
+  "updated_at": "2026-06-16T22:54:18.156349+00:00",
+  "github_actions_run": "27653492383",
   "servers": {
     "github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "www.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "gist.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "alive.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "live.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "central.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "collector.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "github.community": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "desktop.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "education.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "status.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "docs.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "cli.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "copilot.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "login.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "partner.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.113.3",
-      "best_time": 0.6765,
+      "best_ip": "140.82.112.20",
+      "best_time": 0.3142,
       "best_size": 563763
     },
     "raw.githubusercontent.com": {
@@ -141,7 +141,7 @@
       "best_size": null
     }
   },
-  "hosts_block": "# >>> goto-github >>>\n# Managed by goto-github \u2014 do not edit manually\n# Updated at 2026-06-16T20:54:41.204730+00:00\n# Download acceleration: multi-group IP optimization enabled\n140.82.113.3    github.com www.github.com gist.github.com alive.github.com live.github.com central.github.com collector.github.com github.community desktop.github.com education.github.com status.github.com docs.github.com cli.github.com copilot.github.com login.github.com partner.github.com\n# DNS domains (not pinned):\n#   api.github.com pipelines.actions.githubusercontent.com\n# <<< goto-github <<<",
+  "hosts_block": "# >>> goto-github >>>\n# Managed by goto-github \u2014 do not edit manually\n# Updated at 2026-06-16T22:54:18.156307+00:00\n# Download acceleration: multi-group IP optimization enabled\n140.82.112.20   github.com www.github.com gist.github.com alive.github.com live.github.com central.github.com collector.github.com github.community desktop.github.com education.github.com status.github.com docs.github.com cli.github.com copilot.github.com login.github.com partner.github.com\n# DNS domains (not pinned):\n#   api.github.com pipelines.actions.githubusercontent.com\n# <<< goto-github <<<",
   "meta": {
     "groups_optimized": 1,
     "total_groups": 5,
