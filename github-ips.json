@@ -1,17 +1,180 @@
 {
-  "updated_at": "2026-06-16T00:00:00+00:00",
-  "github_actions_run": "initial",
+  "updated_at": "2026-06-16T17:00:01.028478+00:00",
+  "github_actions_run": "27634317374",
   "servers": {
-    "github.com": {"mode": "hosts", "best_ip": "140.82.114.3", "best_time": 0.5, "best_size": 150000},
-    "www.github.com": {"mode": "hosts", "best_ip": "140.82.114.3", "best_time": 0.5, "best_size": 150000},
-    "gist.github.com": {"mode": "hosts", "best_ip": "140.82.114.3", "best_time": 0.5, "best_size": 150000},
-    "raw.githubusercontent.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.8, "best_size": 5000},
-    "codeload.github.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 1.2, "best_size": 5000},
-    "objects.githubusercontent.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.9, "best_size": 5000},
-    "github.githubassets.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.7, "best_size": 5000},
-    "avatars.githubusercontent.com": {"mode": "hosts", "best_ip": "140.82.112.3", "best_time": 0.6, "best_size": 5000},
-    "api.github.com": {"mode": "dns", "best_ip": null},
-    "pipelines.actions.githubusercontent.com": {"mode": "dns", "best_ip": null}
+    "github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "www.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "gist.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "alive.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "live.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "central.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "collector.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "github.community": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "desktop.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "education.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "status.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "docs.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "cli.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "copilot.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "login.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "partner.github.com": {
+      "mode": "hosts",
+      "best_ip": "140.82.114.3",
+      "best_time": 0.2018,
+      "best_size": 563826
+    },
+    "raw.githubusercontent.com": {
+      "mode": "hosts",
+      "best_ip": null,
+      "best_time": null,
+      "best_size": null
+    },
+    "codeload.github.com": {
+      "mode": "hosts",
+      "best_ip": null,
+      "best_time": null,
+      "best_size": null
+    },
+    "objects.githubusercontent.com": {
+      "mode": "hosts",
+      "best_ip": null,
+      "best_time": null,
+      "best_size": null
+    },
+    "github.githubassets.com": {
+      "mode": "hosts",
+      "best_ip": null,
+      "best_time": null,
+      "best_size": null
+    },
+    "avatars.githubusercontent.com": {
+      "mode": "hosts",
+      "best_ip": null,
+      "best_time": null,
+      "best_size": null
+    },
+    "api.github.com": {
+      "mode": "dns",
+      "best_ip": null,
+      "best_time": null,
+      "best_size": null
+    },
+    "pipelines.actions.githubusercontent.com": {
+      "mode": "dns",
+      "best_ip": null,
+      "best_time": null,
+      "best_size": null
+    }
   },
-  "hosts_block": "# >>> goto-github >>>\n# Initial stub — will be updated by cloud scan\n# <<< goto-github <<<"
+  "hosts_block": "# >>> goto-github >>>\n# Managed by goto-github \u2014 do not edit manually\n# Updated at 2026-06-16T17:00:01.028440+00:00\n# Download acceleration: multi-group IP optimization enabled\n140.82.114.3    github.com www.github.com gist.github.com alive.github.com live.github.com central.github.com collector.github.com github.community desktop.github.com education.github.com status.github.com docs.github.com cli.github.com copilot.github.com login.github.com partner.github.com\n# DNS domains (not pinned):\n#   api.github.com pipelines.actions.githubusercontent.com\n# <<< goto-github <<<",
+  "meta": {
+    "groups_optimized": 1,
+    "total_groups": 5,
+    "domain_groups": {
+      "CORE": {
+        "domains": 16,
+        "test_domain": "github.com",
+        "min_content_size": 100000
+      },
+      "RAW": {
+        "domains": 1,
+        "test_domain": "raw.githubusercontent.com",
+        "min_content_size": 1024
+      },
+      "CODELOAD": {
+        "domains": 1,
+        "test_domain": "codeload.github.com",
+        "min_content_size": 1024
+      },
+      "OBJECTS": {
+        "domains": 1,
+        "test_domain": "objects.githubusercontent.com",
+        "min_content_size": 1024
+      },
+      "ASSETS": {
+        "domains": 2,
+        "test_domain": "github.githubassets.com",
+        "min_content_size": 1024
+      }
+    },
+    "dns_only_domains": [
+      "api.github.com",
+      "pipelines.actions.githubusercontent.com"
+    ]
+  }
 }
