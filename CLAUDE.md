@@ -41,7 +41,7 @@ sudo ./fetch.sh --restore   # Remove goto-github block
 |----------|-------------------|
 | macOS | `killall -HUP mDNSResponder; dscacheutil -flushcache` |
 | Linux | `resolvectl flush-caches` |
-| Windows/Git Bash | Manual refresh (hosts write works without DNS flush) |
+| Windows/Git Bash | `ipconfig //flushdns` via cmd.exe |
 
 ## Branch & Commit Conventions
 
