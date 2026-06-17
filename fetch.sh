@@ -587,6 +587,10 @@ main() {
             echo ""
             echo "Platforms: macOS · Linux · Git Bash (Windows)"
             ;;
+        --version|-v)
+            echo "GoToGitHub v1.0.0"
+            echo "https://github.com/cgartlab/goto-github"
+            ;;
         "")
             # Interactive menu (TTY) or one-click (non-TTY with sudo)
             if is_tty; then

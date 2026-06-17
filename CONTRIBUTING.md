@@ -2,13 +2,24 @@
 
 ## 开发环境
 
+**Bash (macOS / Linux / Git Bash):**
 ```bash
 git clone https://github.com/cgartlab/goto-github.git
 cd goto-github
 
 ./fetch.sh --help           # 查看帮助
-./fetch.sh --status        # 查看状态（无需 sudo）
+./fetch.sh --status         # 查看状态（无需 sudo）
 sudo ./fetch.sh             # 测试完整流程（需 sudo）
+```
+
+**PowerShell (Windows):**
+```powershell
+git clone https://github.com/cgartlab/goto-github.git
+cd goto-github
+
+.\goto-github.ps1 --help        # 查看帮助
+.\goto-github.ps1 --pwsh status # 查看状态
+.\goto-github.ps1 --pwsh auto   # 测试完整流程（需管理员）
 ```
 
 ## 分支规范
@@ -42,7 +53,7 @@ sudo ./fetch.sh             # 测试完整流程（需 sudo）
 goto-github/
 ├── fetch.sh                # 核心逻辑 (Bash)
 ├── install.sh              # Unix 一键安装
-├── goto-github.ps1         # PowerShell 适配层
+├── goto-github.ps1         # PowerShell 原生实现（无需 Git Bash）
 ├── install.ps1             # Windows 一键安装
 ├── Makefile                # Lint targets
 ├── .shellcheckrc          # ShellCheck 配置
