@@ -6,20 +6,28 @@
 
 ## Architecture
 
-Single file: `fetch.sh` (263 lines, pure Bash 3.2+)
+```
+fetch.sh                  # Core logic (~420L, pure Bash 3.2+)
+├── need_root()           # Privilege escalation wrapper (sudo -E)
+├── run_cycle()           # Core: fetch→apply→flush→verify (consolidated)
+├── auto_drive()           # Thin wrapper: privilege check → run_cycle
+├── one_click_accelerate() # Thin wrapper: same for menu
+├── interactive_menu()     # 1234Q TTY menu
+├── json_status()         # --pwsh status: pure JSON output
+├── apply_hosts()          # Write with timestamped backup
+├── restore_hosts()        # Remove goto-github block
+├── fetch_hosts_content()  # Fetch with fallback
+├── validate_hosts_content() # Verify ≥10 IPs + github.com
+└── flush_dns()           # DNS flush (macOS/Linux/Windows Git Bash)
+```
 
-```
-fetch.sh
-├── fetch_hosts_content()    Fetch from sources with fallback
-├── validate_hosts_content() Verify ≥10 IPs + github.com present
-├── extract_hosts_lines()    Strip comments, emit IP+domain lines
-├── build_hosts_block()      Wrap in markers + timestamp
-├── apply_hosts()            Write block to /etc/hosts
-├── remove_block()           Remove old block before re-apply
-├── flush_dns()              Refresh DNS cache (macOS/Linux)
-├── verify_hosts()           curl --resolve connectivity check
-└── show_status()            --status output
-```
+### Multi-Platform Installers
+
+| File | Role | Install command |
+|------|------|----------------|
+| `install.sh` | Unix bootstrapper | `curl -sfL .../install.sh \| bash` |
+| `goto-github.ps1` | PowerShell wrapper (thin) | Download + run |
+| `install.ps1` | Windows installer | `irm .../install.ps1 \| iex` |
 
 ## Data Sources
 
@@ -41,7 +49,7 @@ sudo ./fetch.sh --restore   # Remove goto-github block
 |----------|-------------------|
 | macOS | `killall -HUP mDNSResponder; dscacheutil -flushcache` |
 | Linux | `resolvectl flush-caches` |
-| Windows/Git Bash | Manual refresh (hosts write works without DNS flush) |
+| Windows/Git Bash | `ipconfig //flushdns` via cmd.exe |
 
 ## Branch & Commit Conventions
 
@@ -65,15 +73,19 @@ sudo ./fetch.sh             # Test full cycle (sudo required)
 
 ```
 goto-github/
-├── fetch.sh                # Entry point (263L)
+├── fetch.sh                # Core logic (~420L, pure Bash)
+├── install.sh              # Unix one-line installer (curl | bash)
+├── goto-github.ps1         # PowerShell thin wrapper
+├── install.ps1             # Windows one-line installer (irm | iex)
 ├── Makefile                # make lint
 ├── .shellcheckrc           # SC1090/SC1091 disabled
 ├── .gitattributes          # text=auto (cross-platform line endings)
 ├── .github/workflows/
-│   ├── shellcheck.yml      # Lint CI
+│   ├── shellcheck.yml      # Lint CI (fetch.sh + install.sh)
 │   └── opencode.yml        # AI review CI
 ├── README.md
 ├── CONTRIBUTING.md
+├── CLAUDE.md
 ├── AGENTS.md
 └── LICENSE
 ```

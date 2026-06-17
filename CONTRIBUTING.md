@@ -40,7 +40,10 @@ sudo ./fetch.sh             # 测试完整流程（需 sudo）
 
 ```
 goto-github/
-├── fetch.sh                # 唯一入口脚本
+├── fetch.sh                # 核心逻辑 (Bash)
+├── install.sh              # Unix 一键安装
+├── goto-github.ps1         # PowerShell 适配层
+├── install.ps1             # Windows 一键安装
 ├── Makefile                # Lint targets
 ├── .shellcheckrc          # ShellCheck 配置
 ├── .gitattributes          # 跨平台行尾
@@ -59,5 +62,5 @@ goto-github/
 ```bash
 make lint
 # 或
-shellcheck fetch.sh
+shellcheck fetch.sh install.sh
 ```
