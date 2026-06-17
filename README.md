@@ -21,10 +21,10 @@ curl -sfL https://ghproxy.com/https://raw.githubusercontent.com/cgartlab/goto-gi
 
 ```powershell
 # 方式一：原始链接（推荐，如果可访问）
-irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
 
 # 方式二：jsDelivr 镜像（国内推荐）
-irm https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/install.ps1 | iex
+irm https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
 ```
 
 **说明**：安装脚本会自动尝试多个镜像源，如果某个源失败会自动切换到下一个。
@@ -88,7 +88,7 @@ Windows 用户使用 PowerShell 原生实现，无需 Git Bash：
 
 ```powershell
 # 安装
-irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
 
 # 使用
 .\goto-github.ps1           # 交互菜单
