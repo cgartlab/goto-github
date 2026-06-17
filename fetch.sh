@@ -102,7 +102,7 @@ show_status() {
     local ip
     ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
         | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1)
+        | grep -v '^#' | awk '{print $1}' | head -1 || true)
 
     echo ""
     echo "=== GoToGitHub Status ==="
@@ -165,7 +165,7 @@ verify_hosts() {
     local ip
     ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
         | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1)
+        | grep -v '^#' | awk '{print $1}' | head -1 || true)
     if [ -z "$ip" ]; then
         log_warn "No IP found in hosts block"
         return 1
