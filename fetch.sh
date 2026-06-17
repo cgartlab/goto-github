@@ -41,6 +41,27 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 is_macos()  { [ "$(uname)" = "Darwin" ]; }
 is_linux()  { [ "$(uname)" = "Linux" ]; }
 is_mingw()  { [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; }
+is_root()   { [ "$(id -u)" -eq 0 ]; }
+is_tty()    { [ -t 0 ]; }
+
+detect_platform_str() {
+    if is_macos; then
+        echo "macOS"
+    elif is_linux; then
+        echo "Linux"
+    elif is_mingw; then
+        echo "Windows Git Bash"
+    else
+        echo "$(uname)"
+    fi
+}
+
+cleanup() {
+    echo ""
+    echo "  感谢使用 GoToGitHub，再见！"
+    exit 0
+}
+trap cleanup INT TERM
 
 # ── Content validation ───────────────────────────────────────────────────────
 # Prevents malformed or malicious data from being written to /etc/hosts.
@@ -207,9 +228,217 @@ build_hosts_block() {
     echo "$MARKER_END"
 }
 
+# ── Interactive menu ──────────────────────────────────────────────────────────
+
+show_menu_header() {
+    local platform
+    local installed
+    platform=$(detect_platform_str)
+    if [ -f "$HOSTS_FILE" ] && grep -qF "$MARKER_START" "$HOSTS_FILE" 2>/dev/null; then
+        installed="已安装"
+    else
+        installed="未安装"
+    fi
+
+    echo ""
+    echo "========================================"
+    echo "         GoToGitHub — GitHub 加速工具"
+    echo "========================================"
+    echo "  平台: $platform"
+    echo "  状态: $installed"
+    echo "----------------------------------------"
+    echo "  请选择操作:"
+    echo ""
+    echo "    1) 🚀  自动驾驶 (Auto-pilot)"
+    echo "        自动检测平台，一键完成全部操作"
+    echo ""
+    echo "    2) 🔧  手动选择 (Manual)"
+    echo "        自选数据源，管理 hosts 条目"
+    echo ""
+    echo "    3) ⚡  一键加速 (One-click)"
+    echo "        sudo 模式，适合熟练用户"
+    echo ""
+    echo "----------------------------------------"
+    echo -n "  请输入 [1-3] (默认 1): "
+}
+
+show_menu() {
+    local choice
+    show_menu_header
+    read -r choice
+    choice="${choice:-1}"
+    echo ""
+    case "$choice" in
+        1) auto_drive ;;
+        2) manual_select ;;
+        3) one_click_accelerate ;;
+        *) log_error "无效选项: $choice"; echo ""; show_menu ;;
+    esac
+}
+
+auto_drive() {
+    log_info "自动驾驶模式启动..."
+
+    if ! is_root; then
+        if is_mingw; then
+            log_error "Windows Git Bash 需要管理员权限。"
+            echo ""
+            echo "  请右键点击 Git Bash 图标，选择「以管理员身份运行」，"
+            echo "  然后在弹出的窗口中执行:"
+            echo ""
+            echo "    cd $(pwd)"
+            echo "    ./fetch.sh"
+            echo ""
+            exit 1
+        fi
+        # macOS / Linux: re-exec with sudo
+        log_info "需要管理员权限，正在请求 sudo..."
+        exec sudo "$0" --__auto
+        # exec does not return
+    fi
+
+    # --- We are root from here ---
+    local raw_content block
+    raw_content=$(fetch_hosts_content) || {
+        log_error "所有数据源均不可用，请检查网络连接后重试。"
+        exit 1
+    }
+    block=$(build_hosts_block "$raw_content")
+    apply_hosts "$block"
+    flush_dns
+    echo ""
+    if verify_hosts; then
+        echo ""
+        echo "========================================"
+        echo "  ✅ 加速成功！GitHub 已可正常访问"
+        echo "========================================"
+        echo ""
+    else
+        log_warn "加速已应用，但验证未完全通过。"
+        echo "  提示: 运行 ./fetch.sh --status 查看详情"
+    fi
+}
+
+manual_select() {
+    echo "========== 手动选择 =========="
+    echo ""
+    show_status
+
+    echo "  请选择:"
+    echo "    1) jsDelivr CDN（主源）"
+    echo "    2) raw.hellogithub.com（备用源）"
+    echo "    3) 删除已有条目（恢复原状）"
+    echo "    4) 返回主菜单"
+    echo ""
+    echo -n "  请输入 [1-4] (默认 4): "
+    local choice
+    read -r choice
+    choice="${choice:-4}"
+
+    local selected_source=""
+    case "$choice" in
+        1) selected_source="https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts" ;;
+        2) selected_source="https://raw.hellogithub.com/hosts" ;;
+        3)
+            if ! is_root; then
+                if is_mingw; then
+                    log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
+                    exit 1
+                fi
+                exec sudo "$0" --__manual "remove"
+            fi
+            remove_block && flush_dns
+            log_info "已删除 goto-github 条目"
+            return 0
+            ;;
+        4) show_menu; return 0 ;;
+        *) log_error "无效选项: $choice"; manual_select; return 0 ;;
+    esac
+
+    if [ -n "$selected_source" ]; then
+        if ! is_root; then
+            if is_mingw; then
+                log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
+                exit 1
+            fi
+            exec sudo "$0" --__manual "$selected_source"
+        fi
+
+        log_info "使用数据源: $selected_source"
+        local raw_content block
+        raw_content=$(curl -sfL --connect-timeout 10 --max-time 30 "$selected_source" 2>/dev/null) || {
+            log_error "从该源获取数据失败，请检查网络后重试。"
+            echo ""
+            echo "  按 Enter 返回菜单..."
+            read -r _
+            manual_select
+            return 0
+        }
+        if ! validate_hosts_content "$raw_content"; then
+            log_error "该源数据格式不正确。"
+            echo ""
+            echo "  按 Enter 返回菜单..."
+            read -r _
+            manual_select
+            return 0
+        fi
+        block=$(build_hosts_block "$raw_content")
+        apply_hosts "$block"
+        flush_dns
+        verify_hosts || true
+    fi
+}
+
+one_click_accelerate() {
+    if is_root; then
+        local raw_content block
+        raw_content=$(fetch_hosts_content) || exit 1
+        block=$(build_hosts_block "$raw_content")
+        apply_hosts "$block"
+        flush_dns
+        verify_hosts || true
+    elif is_mingw; then
+        log_error "需要管理员权限。"
+        echo ""
+        echo "  请右键点击 Git Bash，选择「以管理员身份运行」，然后执行:"
+        echo ""
+        echo "    cd $(pwd)"
+        echo "    ./fetch.sh"
+        echo ""
+    else
+        log_info "正在请求 sudo..."
+        exec sudo "$0" --__auto
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
     case "${1:-}" in
+        --__auto)
+            # Internal: auto-drive mode (after sudo re-exec)
+            auto_drive
+            ;;
+        --__manual)
+            # Internal: manual mode with pre-selected source (after sudo re-exec)
+            if [ "${2:-}" = "remove" ]; then
+                remove_block && flush_dns
+                log_info "已删除 goto-github 条目"
+            elif [ -n "${2:-}" ]; then
+                local raw_content block
+                raw_content=$(curl -sfL --connect-timeout 10 --max-time 30 "$2" 2>/dev/null) || {
+                    log_error "从该源获取数据失败"
+                    exit 1
+                }
+                if ! validate_hosts_content "$raw_content"; then
+                    log_error "该源数据格式不正确"
+                    exit 1
+                fi
+                block=$(build_hosts_block "$raw_content")
+                apply_hosts "$block"
+                flush_dns
+                verify_hosts || true
+            fi
+            ;;
         --status)
             show_status
             ;;
@@ -229,7 +458,8 @@ main() {
         --help|-h)
             echo "Usage: $0 [--status|--restore|--help]"
             echo ""
-            echo "  (no flags)     Fetch GitHub CDN hosts and apply to /etc/hosts (requires sudo)"
+            echo "  (no flags)     Interactive menu (auto-pilot, manual, one-click)"
+            echo "                 Non-TTY / CI: runs full cycle if root"
             echo "  --status       Show current IP and connectivity status"
             echo "  --restore      Remove goto-github entries from /etc/hosts"
             echo "  --help         Show this help"
@@ -244,19 +474,23 @@ main() {
             echo "Platforms: macOS · Linux · Git Bash (Windows)"
             ;;
         "")
-            if [ "$(id -u)" -ne 0 ]; then
+            # TTY: show interactive menu; non-TTY: run full cycle if root
+            if is_tty; then
+                show_menu
+            elif ! is_root; then
                 log_error "This operation requires sudo. Run: sudo $0"
                 exit 1
-            fi
-            local raw_content block
-            raw_content=$(fetch_hosts_content) || exit 1
-            block=$(build_hosts_block "$raw_content") || exit 1
-            apply_hosts "$block"
-            flush_dns
-            if verify_hosts; then
-                log_info "Done. Run '$0 --status' to verify."
             else
-                log_warn "Applied but verification failed. Check your network or try again."
+                local raw_content block
+                raw_content=$(fetch_hosts_content) || exit 1
+                block=$(build_hosts_block "$raw_content") || exit 1
+                apply_hosts "$block"
+                flush_dns
+                if verify_hosts; then
+                    log_info "Done. Run '$0 --status' to verify."
+                else
+                    log_warn "Applied but verification failed. Check your network or try again."
+                fi
             fi
             ;;
         *)
