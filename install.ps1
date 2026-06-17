@@ -9,21 +9,21 @@
     Automatically tries multiple mirror sources if the primary source fails.
 
     One-liner (run in PowerShell):
-        irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 | iex
-        irm https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/install.ps1 | iex
+        irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
+        irm https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
 
 .PARAMETER Uninstall
     Remove the installation directory and all files.
 
 .PARAMETER Update
     Re-download both files to the existing installation directory.
+.EXAMPLE
+    irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
+    Install GoToGitHub.
+
 
 .EXAMPLE
-    irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 | iex
-    Install GoToGitHub (available as irm | iex one-liner).
-
-.EXAMPLE
-    irm https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/install.ps1 | iex
+    irm https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
     Install using jsDelivr mirror (recommended for China).
 
 .EXAMPLE
@@ -275,7 +275,7 @@ function Main {
         Write-ErrorMsg "WSL detected. GoToGitHub requires Windows PowerShell or Git Bash, not WSL."
         Write-Host ""
         Write-Host "  Run this installer in Windows PowerShell with:"
-        Write-Host "    irm https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/install.ps1 | iex"
+        Write-Host "    irm https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/install.ps1 -OutFile `"$env:TEMP\install.ps1`"; & `"$env:TEMP\install.ps1`""
         Write-Host ""
         exit 1
     }
