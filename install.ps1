@@ -1,9 +1,4 @@
-﻿# Self-unblock: bypass execution policy for this process only (Windows PS 5.1)
-$ep = Get-ExecutionPolicy -Scope Process -ErrorAction SilentlyContinue
-if ($ep -eq 'Restricted' -or $ep -eq 'AllSigned') {
-    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-}
-<#
+﻿<#
 .SYNOPSIS
     One-line installer for GoToGitHub — GitHub access acceleration tool for Windows.
     Supports multiple mirror sources for regions with GitHub access issues.
