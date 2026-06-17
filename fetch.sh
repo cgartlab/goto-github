@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # =============================================================================
-# GoToGitHub — Local fetch script
-# Fetches cloud-verified GitHub CDN IPs from the repo and applies to /etc/hosts
+# GoToGitHub — Direct hosts fetch from GitHub520 project
+# Fetches verified GitHub CDN IPs from community-maintained hosts sources and
+# applies them to /etc/hosts. No cloud scanning infrastructure needed.
 # =============================================================================
 # Usage:
-#   sudo ./fetch.sh              # Fetch and apply IPs
-#   ./fetch.sh --status         # Show current IP status
+#   sudo ./fetch.sh              # Fetch and apply hosts entries
+#   ./fetch.sh --status         # Show current IP and connectivity
 #   ./fetch.sh --restore        # Remove goto-github entries from /etc/hosts
 #   ./fetch.sh --help           # Show this help
 #
+# Data sources:
+#   https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts
+#   https://raw.hellogithub.com/hosts
+#
 # Environment variables:
-#   GITHUB_IPS_URL   — URL to github-ips.json (default: auto-detect from branch)
-#   HOSTS_FILE      — hosts file path (default: /etc/hosts)
+#   HOSTS_FILE  — hosts file path (default: /etc/hosts)
 # =============================================================================
 
 set -euo pipefail
@@ -21,11 +25,13 @@ HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 MARKER_START="# >>> goto-github >>>"
 MARKER_END="# <<< goto-github <<<"
 
+SOURCES="
+  https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts
+  https://raw.hellogithub.com/hosts
+"
+
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -35,165 +41,123 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 is_macos()  { [ "$(uname)" = "Darwin" ]; }
 is_linux()  { [ "$(uname)" = "Linux" ]; }
 
-# ── Retry curl ────────────────────────────────────────────────────────────────
-# Usage: retry_curl <url> [connect_timeout] [max_time]
-retry_curl() {
-    local url="$1"
-    local connect_timeout="${2:-5}"
-    local max_time="${3:-15}"
-    local attempt=0
-    local max_attempts=3
-
-    while [ $((attempt += 1)) -le $max_attempts ]; do
-        if curl -sf --connect-timeout "$connect_timeout" \
-               --max-time "$max_time" \
-               -o /dev/null "$url" 2>/dev/null; then
-            return 0
-        fi
-        if [ $attempt -lt $max_attempts ]; then
-            log_warn "Retry $attempt/$max_attempts for $url"
-            sleep 2
-        fi
-    done
-    return 1
-}
-
-# ── Detect cloud URL ──────────────────────────────────────────────────────────
-# Auto-detects the raw github-ips.json URL based on current git remote
-detect_cloud_url() {
-    local remote="${1:-origin}"
-    local repo_url
-    repo_url=$(git remote get-url "$remote" 2>/dev/null | sed 's/\.git$//')
-    [ -z "$repo_url" ] && return 1
-
-    # Extract owner/repo from git URL
-    local owner_repo
-    # shellcheck disable=SC2001
-    owner_repo=$(echo "$repo_url" | sed 's|.*github\.com/||;s|\.git$||')
-    [ -z "$owner_repo" ] && return 1
-
-    # Determine branch (use current branch, fallback to main)
-    local branch
-    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-    [ "$branch" = "HEAD" ] && branch="main"
-
-    echo "https://raw.githubusercontent.com/${owner_repo}/${branch}/github-ips.json"
-}
-
-# ── Fetch IP JSON from cloud ──────────────────────────────────────────────────
-fetch_cloud_json() {
-    local url="$1"
-    log_info "Fetching IPs from $url"
-
-    local json
-    json=$(curl -sf --connect-timeout 5 --max-time 15 "$url" 2>/dev/null) || {
-        log_error "Failed to fetch $url"
-        return 1
-    }
-
-    # Validate JSON structure
-    if ! echo "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'servers' in d" 2>/dev/null; then
-        log_error "Invalid JSON from cloud (missing 'servers' key)"
+# ── Content validation ───────────────────────────────────────────────────────
+# Prevents malformed or malicious data from being written to /etc/hosts.
+validate_hosts_content() {
+    local content="$1"
+    local ip_count
+    ip_count=$(echo "$content" | grep -v '^#' | grep -v '^$' | grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || echo 0)
+    if [ "$ip_count" -lt 10 ]; then
+        log_error "Content validation failed: only $ip_count valid IP lines (need >= 10)"
         return 1
     fi
-
-    echo "$json"
-}
-
-# ── Parse JSON and build hosts block ─────────────────────────────────────────
-build_hosts_block() {
-    local json="$1"
-
-    echo "$json" | python3 -c "
-import json, sys
-
-d = json.load(sys.stdin)
-servers = d.get('servers', {})
-
-lines = []
-lines.append('# >>> goto-github >>>')
-lines.append('# Managed by GoToGitHub — $(date +%Y-%m-%d)')
-lines.append('# Source: GitHub Actions cloud scan')
-
-# Group domains by IP
-ip_groups = {}
-dns_domains = []
-
-for domain, info in servers.items():
-    mode = info.get('mode', 'hosts')
-    if mode == 'dns':
-        dns_domains.append(domain)
-        continue
-    best_ip = info.get('best_ip')
-    if not best_ip:
-        continue
-    if best_ip not in ip_groups:
-        ip_groups[best_ip] = []
-    ip_groups[best_ip].append(domain)
-
-# Write pinned domains
-for ip, domains in sorted(ip_groups.items()):
-    lines.append(f'{ip:15} {\" \".join(domains)}')
-
-# DNS-only comment
-if dns_domains:
-    lines.append(f'# DNS domains (not pinned): {\" \".join(dns_domains)}')
-
-lines.append('# <<< goto-github <<<')
-print('\n'.join(lines))
-" 2>/dev/null || {
-        log_error "Failed to parse JSON"
+    if ! echo "$content" | grep -q 'github.com'; then
+        log_error "Content validation failed: no 'github.com' domain found"
         return 1
-    }
-}
-
-# ── Check sudo ────────────────────────────────────────────────────────────────
-# shellcheck disable=SC2120
-need_sudo() {
-    if [ "$(id -u)" -ne 0 ]; then
-        log_error "This script requires sudo. Run: sudo $0"
-        exit 1
     fi
+    return 0
 }
 
-# ── Flush DNS cache ───────────────────────────────────────────────────────────
+# ── Extract valid lines from raw hosts content ───────────────────────────────
+# Returns only IP + domain lines, stripped of trailing comments.
+extract_hosts_lines() {
+    local content="$1"
+    echo "$content" \
+        | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\s+' \
+        | sed 's/#.*//' \
+        | sed 's/[[:space:]]*$//' \
+        | grep -v '^$'
+}
+
+# ── DNS cache flush ───────────────────────────────────────────────────────────
 flush_dns() {
     log_info "Flushing DNS cache..."
     if is_macos; then
         killall -HUP mDNSResponder 2>/dev/null || true
         dscacheutil -flushcache 2>/dev/null || true
-    elif is_linux; then
+    else
         resolvectl flush-caches 2>/dev/null || true
         systemctl restart systemd-resolved 2>/dev/null || true
     fi
     log_info "DNS cache flushed"
 }
 
-# ── Remove existing goto-github block ────────────────────────────────────────
+# ── Remove existing goto-github block from hosts file ────────────────────────
 remove_block() {
     if ! grep -qF "$MARKER_START" "$HOSTS_FILE" 2>/dev/null; then
-        return 0  # Nothing to remove
+        return 0
     fi
-
+    local escaped_start escaped_end
+    escaped_start=$(printf '%s\n' "$MARKER_START" | sed 's/[\/&]/\\&/g')
+    escaped_end=$(printf '%s\n' "$MARKER_END" | sed 's/[\/&]/\\&/g')
     if is_macos; then
-        sed -i '' "/^${MARKER_START//\//\\/}/,/^${MARKER_END//\//\\/}/d" "$HOSTS_FILE"
+        sed -i '' "/^${escaped_start}/,/^${escaped_end}/d" "$HOSTS_FILE"
     else
-        sed -i "/^${MARKER_START//\//\\/}/,/^${MARKER_END//\//\\/}/d" "$HOSTS_FILE"
+        sed -i "/^${escaped_start}/,/^${escaped_end}/d" "$HOSTS_FILE"
     fi
 }
 
-# ── Apply hosts entry ──────────────────────────────────────────────────────────
+# ── Show current status ───────────────────────────────────────────────────────
+show_status() {
+    local ip
+    ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
+        | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
+        | grep -v '^#' | awk '{print $1}' | head -1 || true)
+
+    echo ""
+    echo "=== GoToGitHub Status ==="
+    echo ""
+
+    if [ -z "$ip" ]; then
+        echo "  IP: (not installed)"
+        echo "  Run 'sudo ./fetch.sh' to install."
+    else
+        echo "  IP:   $ip"
+        local http_code
+        http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
+            --resolve "github.com:443:$ip" \
+            -o /dev/null -w "%{http_code}" \
+            "https://github.com/" 2>/dev/null) || http_code=""
+        if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+            http_code="000"
+        fi
+        if [ "$http_code" = "200" ]; then
+            echo -e "  Status: ${GREEN}OK${NC} — github.com reachable"
+        else
+            echo -e "  Status: ${RED}FAILED${NC} (HTTP $http_code)"
+        fi
+    fi
+    echo ""
+}
+
+# ── Apply hosts block ──────────────────────────────────────────────────────────
 apply_hosts() {
     local block="$1"
-
     remove_block
-
-    {
-        echo ""
-        echo "$block"
-    } | sudo tee -a "$HOSTS_FILE" > /dev/null
-
+    printf "\n%s\n" "$block" >> "$HOSTS_FILE"
     log_info "Applied to $HOSTS_FILE"
+}
+
+# ── Fetch from sources with fallback ──────────────────────────────────────────
+fetch_hosts_content() {
+    local content url
+    while IFS= read -r url; do
+        [ -z "$url" ] && continue
+        log_info "Fetching from $url"
+        content=$(curl -sfL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)
+        if [ -z "$content" ]; then
+            log_warn "Failed to fetch from $url"
+            continue
+        fi
+        if validate_hosts_content "$content"; then
+            echo "$content"
+            return 0
+        fi
+        log_warn "Content validation failed for $url"
+    done <<< "$SOURCES"
+
+    log_error "All sources exhausted — no valid hosts content obtained."
+    return 1
 }
 
 # ── Verify applied IP ───────────────────────────────────────────────────────────
@@ -201,21 +165,20 @@ verify_hosts() {
     local ip
     ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
         | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1)
-
+        | grep -v '^#' | awk '{print $1}' | head -1 || true)
     if [ -z "$ip" ]; then
         log_warn "No IP found in hosts block"
         return 1
     fi
-
     log_info "Verifying IP $ip against github.com..."
     local http_code
     http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
         --resolve "github.com:443:$ip" \
-        -o /dev/null \
-        -w "%{http_code}" \
-        "https://github.com/" 2>/dev/null || echo "000")
-
+        -o /dev/null -w "%{http_code}" \
+        "https://github.com/" 2>/dev/null) || http_code=""
+    if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+        http_code="000"
+    fi
     if [ "$http_code" = "200" ]; then
         log_info "Verification PASSED — github.com reachable via $ip"
         return 0
@@ -225,47 +188,16 @@ verify_hosts() {
     fi
 }
 
-# ── Show status ───────────────────────────────────────────────────────────────
-show_status() {
-    local ip block_time
-
-    ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
-        | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1)
-
-    block_time=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
-        | grep '# Updated at\|# Managed by GoToGitHub' | head -1)
-
-    echo ""
-    echo "=== GoToGitHub Status ==="
-    echo ""
-
-    if [ -z "$ip" ]; then
-        echo "  IP: (not installed)"
-    else
-        echo "  IP:   $ip"
-    fi
-
-    if [ -n "$block_time" ]; then
-        echo "  $block_time"
-    fi
-
-    if [ -n "$ip" ]; then
-        local http_code
-        http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
-            --resolve "github.com:443:$ip" \
-            -o /dev/null \
-            -w "%{http_code}" \
-            "https://github.com/" 2>/dev/null || echo "000")
-
-        if [ "$http_code" = "200" ]; then
-            echo -e "  Status: ${GREEN}OK${NC}"
-        else
-            echo -e "  Status: ${RED}FAILED${NC} (HTTP $http_code)"
-        fi
-    fi
-
-    echo ""
+# ── Build hosts block from raw content ────────────────────────────────────────
+build_hosts_block() {
+    local content="$1"
+    local lines
+    lines=$(extract_hosts_lines "$content")
+    echo "$MARKER_START"
+    echo "# Managed by GoToGitHub — $(date +%Y-%m-%d)"
+    echo "# Source: 521xueweihan/GitHub520"
+    echo "$lines"
+    echo "$MARKER_END"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -275,7 +207,10 @@ main() {
             show_status
             ;;
         --restore)
-            need_sudo "$@"
+            if [ "$(id -u)" -ne 0 ]; then
+                log_error "This operation requires sudo. Run: sudo $0 --restore"
+                exit 1
+            fi
             if grep -qF "$MARKER_START" "$HOSTS_FILE" 2>/dev/null; then
                 remove_block
                 flush_dns
@@ -287,38 +222,30 @@ main() {
         --help|-h)
             echo "Usage: $0 [--status|--restore|--help]"
             echo ""
-            echo "  Without flags:   Fetch cloud IPs and apply to /etc/hosts (requires sudo)"
-            echo "  --status:       Show current IP and status"
-            echo "  --restore:      Remove goto-github entries from /etc/hosts"
+            echo "  (no flags)     Fetch GitHub CDN hosts and apply to /etc/hosts (requires sudo)"
+            echo "  --status       Show current IP and connectivity status"
+            echo "  --restore      Remove goto-github entries from /etc/hosts"
+            echo "  --help         Show this help"
+            echo ""
+            echo "Data sources (mirror list with automatic fallback):"
+            echo "  https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts"
+            echo "  https://raw.hellogithub.com/hosts"
             echo ""
             echo "Environment:"
-            echo "  GITHUB_IPS_URL  URL to github-ips.json (auto-detected if not set)"
-            echo "  HOSTS_FILE     hosts file path (default: /etc/hosts)"
+            echo "  HOSTS_FILE  hosts file path (default: /etc/hosts)"
+            echo ""
+            echo "Platforms: macOS, Linux"
             ;;
         "")
-            need_sudo "$@"
-
-            # Detect or use provided URL
-            local url="${GITHUB_IPS_URL:-}"
-            if [ -z "$url" ]; then
-                url=$(detect_cloud_url) || {
-                    log_error "Failed to auto-detect cloud URL. Set GITHUB_IPS_URL manually."
-                    exit 1
-                }
+            if [ "$(id -u)" -ne 0 ]; then
+                log_error "This operation requires sudo. Run: sudo $0"
+                exit 1
             fi
-
-            log_info "Using cloud URL: $url"
-
-            # Fetch and parse
-            local json block
-            json=$(fetch_cloud_json "$url") || exit 1
-            block=$(build_hosts_block "$json") || exit 1
-
-            # Apply
+            local raw_content block
+            raw_content=$(fetch_hosts_content) || exit 1
+            block=$(build_hosts_block "$raw_content") || exit 1
             apply_hosts "$block"
             flush_dns
-
-            # Verify
             if verify_hosts; then
                 log_info "Done. Run '$0 --status' to verify."
             else
