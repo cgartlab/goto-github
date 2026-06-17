@@ -54,7 +54,8 @@ goto-github/
 ├── fetch.sh                # 核心逻辑 (Bash)
 ├── install.sh              # Unix 一键安装
 ├── goto-github.ps1         # PowerShell 原生实现（无需 Git Bash）
-├── install.ps1             # Windows 一键安装
+├── bootstrap.ps1          # Windows bootstrapper (irm | iex, 推荐)
+├── install.ps1             # Windows 一键安装 (OutFile 备用)
 ├── Makefile                # Lint targets
 ├── .shellcheckrc          # ShellCheck 配置
 ├── .gitattributes          # 跨平台行尾
