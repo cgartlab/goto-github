@@ -40,6 +40,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 is_macos()  { [ "$(uname)" = "Darwin" ]; }
 is_linux()  { [ "$(uname)" = "Linux" ]; }
+is_mingw()  { [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; }
 
 # ── Content validation ───────────────────────────────────────────────────────
 # Prevents malformed or malicious data from being written to /etc/hosts.
@@ -75,9 +76,12 @@ flush_dns() {
     if is_macos; then
         killall -HUP mDNSResponder 2>/dev/null || true
         dscacheutil -flushcache 2>/dev/null || true
-    else
+    elif is_linux; then
         resolvectl flush-caches 2>/dev/null || true
         systemctl restart systemd-resolved 2>/dev/null || true
+    elif is_mingw; then
+        # Windows: use native ipconfig via cmd.exe
+        ipconfig //flushdns 2>/dev/null || true
     fi
     log_info "DNS cache flushed"
 }
@@ -91,9 +95,12 @@ remove_block() {
     escaped_start=$(printf '%s\n' "$MARKER_START" | sed 's/[\/&]/\\&/g')
     escaped_end=$(printf '%s\n' "$MARKER_END" | sed 's/[\/&]/\\&/g')
     if is_macos; then
+        # macOS sed requires empty string argument for -i
         sed -i '' "/^${escaped_start}/,/^${escaped_end}/d" "$HOSTS_FILE"
     else
-        sed -i "/^${escaped_start}/,/^${escaped_end}/d" "$HOSTS_FILE"
+        # GNU sed (Linux, MINGW64, MSYS) — use -- to stop sed from
+        # interpreting leading dash in patterns as options
+        sed -i -- "/^${escaped_start}/,/^${escaped_end}/d" "$HOSTS_FILE"
     fi
 }
 
@@ -234,7 +241,7 @@ main() {
             echo "Environment:"
             echo "  HOSTS_FILE  hosts file path (default: /etc/hosts)"
             echo ""
-            echo "Platforms: macOS, Linux"
+            echo "Platforms: macOS · Linux · Git Bash (Windows)"
             ;;
         "")
             if [ "$(id -u)" -ne 0 ]; then
