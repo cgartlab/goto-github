@@ -69,7 +69,7 @@ function Request-Admin {
             $scriptPath = $PSCommandPath
         }
         Write-Host "  → 正在请求管理员权限..." -ForegroundColor Cyan
-        $arguments = "-NoExit", "-Command", "cd '$PWD'; & '$scriptPath'"
+        $arguments = "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", "cd '$PWD'; & '$scriptPath'"
         Start-Process powershell.exe -Verb RunAs -ArgumentList $arguments
         Write-Host "  → 如果弹出 UAC 提示，请点击「是」" -ForegroundColor Yellow
         exit 0
