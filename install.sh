@@ -5,7 +5,7 @@
 # No sudo required.
 # =============================================================================
 # Usage:
-#   curl -sfL https://raw.githubusercontent.com/USER/repo/main/install.sh | bash
+#   curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash
 #   ./install.sh --uninstall
 #   ./install.sh --version
 #   ./install.sh --update
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 VERSION="1.0.0"
-REPO_URL="https://raw.githubusercontent.com/USER/repo/main/fetch.sh"
+REPO_URL="https://raw.githubusercontent.com/cgartlab/goto-github/main/fetch.sh"
 
 INSTALL_DIR="${HOME}/.local/share/goto-github"
 BIN_DIR="${HOME}/.local/bin"
@@ -54,7 +54,7 @@ do_install() {
     echo ""
     log_info "✅ Installed to ${SYMLINK}"
     echo ""
-    echo "  Quick install:  curl -sfL https://raw.githubusercontent.com/USER/repo/main/install.sh | bash"
+    echo "  Quick install:  curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash"
     echo "  Quick uninstall: ${SYMLINK} --uninstall"
     echo ""
     echo "  Add ${BIN_DIR} to your PATH if not already:"
@@ -91,7 +91,7 @@ do_version() {
         log_info "Installed at: ${SYMLINK}"
     else
         echo "GoToGitHub — not installed"
-        log_info "Install with: curl -sfL https://raw.githubusercontent.com/USER/repo/main/install.sh | bash"
+        log_info "Install with: curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash"
     fi
 }
 
@@ -137,7 +137,7 @@ main() {
             echo "  --help,-h     Show this help"
             echo ""
             echo "Quick install:"
-            echo "  curl -sfL https://raw.githubusercontent.com/USER/repo/main/install.sh | bash"
+            echo "  curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash"
             echo ""
             echo "Or manually:"
             echo "  curl -sfL ${REPO_URL} -o ${SCRIPT_PATH}"
