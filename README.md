@@ -1,5 +1,8 @@
 # GoToGitHub
 
+[![Lint](https://github.com/cgartlab/goto-github/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/cgartlab/goto-github/actions)
+[![MIT License](https://img.shields.io/github/license/cgartlab/goto-github?style=flat-square)](https://github.com/cgartlab/goto-github/blob/main/LICENSE)
+
 GitHub 访问加速工具。实时从社区维护的 hosts 源获取 GitHub 域名映射，写入本地 `/etc/hosts`，无需本地扫描。
 
 ## 一键安装

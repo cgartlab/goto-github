@@ -38,7 +38,8 @@ goto-github.ps1           # Pure PowerShell implementation (Windows, no bash.exe
 |------|------|----------------|
 | `install.sh` | Unix bootstrapper | `curl -sfL .../install.sh \| bash` |
 | `goto-github.ps1` | PowerShell native (no bash.exe) | Download + run |
-| `install.ps1` | Windows installer | `irm .../install.ps1 \| iex` |
+| `bootstrap.ps1` | Windows bootstrapper (recommended) | `irm .../bootstrap.ps1 \| iex` |
+| `install.ps1` | Windows installer (fallback) | `irm .../install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"` |
 
 ## Data Sources
 
@@ -106,7 +107,8 @@ goto-github/
 ├── fetch.sh                # Core logic (~420L, pure Bash)
 ├── install.sh              # Unix one-line installer (curl | bash)
 ├── goto-github.ps1         # PowerShell native (no bash.exe)
-├── install.ps1             # Windows one-line installer (irm | iex)
+├── bootstrap.ps1          # Windows bootstrapper (irm | iex, recommended)
+├── install.ps1             # Windows installer (OutFile fallback)
 ├── Makefile                # make lint
 ├── .shellcheckrc           # SC1090/SC1091 disabled
 ├── .gitattributes          # text=auto (cross-platform line endings)

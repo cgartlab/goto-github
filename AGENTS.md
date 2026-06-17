@@ -12,7 +12,8 @@ goto-github/
 ├── fetch.sh                # 核心逻辑 (Bash, ~420行)
 ├── install.sh             # Unix 一键安装 (curl | bash)
 ├── goto-github.ps1         # PowerShell 原生实现 (无需 Git Bash)
-├── install.ps1             # Windows 一键安装 (irm | iex)
+├── bootstrap.ps1          # Windows bootstrapper (irm | iex, 推荐)
+├── install.ps1             # Windows 一键安装 (OutFile 备用)
 ├── Makefile                # make lint
 ├── .shellcheckrc           # ShellCheck 配置
 ├── .gitattributes          # 跨平台行尾
@@ -51,7 +52,7 @@ goto-github/
 | 平台 | 命令 |
 |------|------|
 | Unix (macOS / Linux) | `curl -sfL .../install.sh \| bash` |
-| Windows PowerShell | `irm .../install.ps1 \| iex` |
+| Windows PowerShell | `irm .../bootstrap.ps1 \| iex` |
 
 ## CONVENTIONS
 
