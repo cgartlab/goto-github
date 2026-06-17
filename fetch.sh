@@ -121,7 +121,7 @@ flush_dns() {
 # ── PowerShell subcommand interface ──────────────────────────────────────────
 # Outputs machine-parseable JSON for --pwsh status
 json_status() {
-    local ip http_code reachable="false" error=""
+    local ip http_code reachable="false"
 
     ip=$(grep -m1 "github.com" "$HOSTS_FILE" 2>/dev/null | awk '{print $1}')
     if [ -z "$ip" ]; then
