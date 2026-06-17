@@ -6,11 +6,14 @@
 git clone https://github.com/cgartlab/goto-github.git
 cd goto-github
 
-# 本地测试 fetch
-sudo ./fetch.sh --status
+# 查看帮助
+./fetch.sh --help
 
-# 测试扫描脚本
-python3 scripts/scan.py
+# 查看当前状态（无需 sudo）
+./fetch.sh --status
+
+# 测试完整流程（需要 sudo）
+sudo ./fetch.sh
 ```
 
 ## 分支规范
@@ -21,30 +24,39 @@ python3 scripts/scan.py
 ## 提交规范
 
 使用 [Conventional Commits](https://www.conventionalcommits.org/)：
-
-```
-feat: 添加新功能
-fix: 修复问题
-docs: 更新文档
-refactor: 重构代码
-chore: 日常维护（依赖更新、配置变更）
-```
+- `feat:` 添加新功能
+- `fix:` 修复问题
+- `docs:` 更新文档
+- `refactor:` 重构
 
 ## PR 流程
 
 1. 从 `main` 创建分支
 2. 提交更改
-3. 创建 PR 到 `main`
-4. 合并后删除分支
+3. 确保 `shellcheck fetch.sh` 无警告
+4. 创建 PR 到 `main`
+5. 合并后删除分支
 
 ## 文件结构
 
 ```
 goto-github/
-├── fetch.sh              # 本地获取并应用 IP
-├── github-ips.json       # 云端扫描结果（自动更新）
-├── scripts/
-│   └── scan.py          # 云端 IP 扫描脚本
+├── fetch.sh              # 唯一入口脚本
+├── Makefile              # Lint targets
+├── README.md
+├── CONTRIBUTING.md
+├── CLAUDE.md
+├── AGENTS.md
+├── LICENSE
+├── .gitignore
+├── .shellcheckrc         # ShellCheck config
 └── .github/workflows/
-    └── scan.yml         # GitHub Actions 定时扫描
+    ├── shellcheck.yml
+    └── opencode.yml
+```
+
+## Lint
+
+```bash
+shellcheck fetch.sh
 ```
