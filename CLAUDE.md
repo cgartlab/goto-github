@@ -1,78 +1,59 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-**GoToGitHub** — A Bash tool that scans GitHub CDN IPs, validates them against real GitHub page content, and configures `/etc/hosts` to enable direct GitHub access from restricted networks.
+**GoToGitHub** — A Bash tool that fetches GitHub CDN IPs from community-maintained hosts sources (521xueweihan/GitHub520) and writes them to `/etc/hosts`. No local scanning, no Python dependency.
 
 ## Architecture
 
+Single script: `fetch.sh` (263 lines, pure bash)
+
 ```
-bin/
-  goto-github.sh          # Main CLI entrypoint — dispatches commands (run/status/install/uninstall/help)
-lib/
-  00-constants.sh         # Constants: paths, IPs, CIDRs, domains, curl params (sourced first)
-  01-utils.sh             # Utilities: log, die, check_deps, is_macos, is_linux, check_sudo, cache I/O, banner
-  02-scan.sh              # Scanning logic: CIDR expansion, parallel batch scanning, priority IP testing
-  03-validate.sh          # Validation: curl-based IP verification, content-size check, hosts IP extraction
-  04-apply.sh             # Apply: hosts file management (marker-based), DNS flush, status display
-  05-install.sh           # Installation: file copy, launchd/systemd scheduler, sudoers (macOS)
-  06-uninstall.sh         # Uninstallation: full cleanup of all components
+fetch.sh
+├── fetch_hosts_content()   # 遍历数据源，返回第一个有效内容
+├── validate_hosts_content() # 内容安全验证（IP数量 + github.com存在性）
+├── extract_hosts_lines()   # 提取有效 IP+域名 行
+├── build_hosts_block()     # 构建带标记的 hosts 区块
+├── apply_hosts()           # 写入 /etc/hosts
+├── remove_block()          # 移除旧区块
+├── flush_dns()            # 刷新 DNS 缓存
+├── verify_hosts()         # curl --resolve 验证连通性
+└── show_status()          # --status 输出
 ```
 
-**Module sourcing order** (strict dependency chain): `00` → `01` → `02` → `03` → `04` → `05` → `06`. Each module uses a guard variable (`_GOTO_GITHUB_XX_INCLUDED`) to prevent double-sourcing.
+## Data Sources (in priority order)
+1. `https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts` — primary
+2. `https://raw.hellogithub.com/hosts` — fallback
 
-**Scanning pipeline** (`scan_all`):
-1. Test 8 priority IPs in parallel → pick fastest valid one
-2. If none pass, expand 4 CIDR ranges (~thousands of IPs) via Python3 (or fallback embedded list)
-3. Scan CIDR IPs in batches of 100 with early-break on first valid hit
-4. Validation: `curl --resolve` with content-size threshold (>100KB) and HTTP 200/301/302
-
-**Hosts management**: Uses `# >>> goto-github >>>` / `# <<< goto-github <<<` markers to delimit the managed block. `apply_hosts` replaces the entire block atomically.
-
-**Scheduler**: macOS → launchd (StartInterval=10800s); Linux → systemd service + timer (OnUnitActiveSec=3h, Persistent=true, RandomizedDelaySec=60).
-
-## Development Commands
+## Commands
 
 ```bash
-# Run lint (ShellCheck, severity=warning)
-make lint
-
-# Run tests
-make test
-
-# Install locally
-sudo ./bin/goto-github.sh install
-
-# Run a single scan
-sudo ./bin/goto-github.sh run
-
-# Check status
-sudo ./bin/goto-github.sh status
-
-# Uninstall
-sudo ./bin/goto-github.sh uninstall
-
-# Full build cycle (lint only, no build step needed for Bash)
-make all
-
-# Clean
-make clean
+sudo ./fetch.sh              # Fetch and apply hosts
+./fetch.sh --status         # Show current IP and connectivity
+sudo ./fetch.sh --restore    # Remove goto-github block
+./fetch.sh --help           # Show help
 ```
 
-## CI
-
-GitHub Actions runs ShellCheck on push/PR to `main` and `dev-*` branches, triggered by changes to `bin/**`, `lib/**`, and `Makefile`. Config: [`.github/workflows/shellcheck.yml`](.github/workflows/shellcheck.yml).
+## Platform Support
+- macOS: `killall -HUP mDNSResponder` for DNS flush
+- Linux: `resolvectl flush-caches` for DNS flush
 
 ## Branch & Commit Conventions
-
 - `main` — stable releases
 - `dev-*` — development branches
-- Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `fix(ci):`, `fix(security):`
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`
 
-## Platform Support
+## CI
+ShellCheck runs on push/PR to `main` and `dev-*`. Config: `.github/workflows/shellcheck.yml`.
 
-- **macOS**: `bin/goto-github.sh`, launchd plist (`contrib/macos/`), `sudoers.d` passwordless sudo for specific commands
-- **Linux**: `bin/goto-github.sh`, systemd service + timer (`contrib/linux/`)
-- Requires: Bash 3.2+, `curl`, `sudo`; `python3` optional (CIDR expansion fallback to embedded IP list)
+## Development
+```bash
+# Lint
+shellcheck fetch.sh
+
+# Test status (read-only, no sudo needed)
+./fetch.sh --status
+
+# Full cycle (requires sudo)
+sudo ./fetch.sh
+```
