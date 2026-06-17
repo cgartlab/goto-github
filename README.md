@@ -44,6 +44,16 @@ sudo ./fetch.sh --restore   # 移除 goto-github 条目
 
 macOS · Linux · Git Bash (Windows)
 
+## Acknowledgements
+
+GoToGitHub would not exist without the community-maintained hosts data provided by the [GitHub520](https://github.com/521xueweihan/GitHub520) project. All CDN IP data comes directly from their work.
+
+---
+
+## 鸣谢
+
+GoToGitHub 依赖 [GitHub520](https://github.com/521xueweihan/GitHub520) 社区项目维护的 hosts 数据，所有 CDN IP 均来源于此。
+
 ## 许可证
 
 MIT
