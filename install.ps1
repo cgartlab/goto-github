@@ -1,4 +1,4 @@
-# Self-unblock: bypass execution policy for this process only (Windows PS 5.1)
+﻿# Self-unblock: bypass execution policy for this process only (Windows PS 5.1)
 $ep = Get-ExecutionPolicy -Scope Process -ErrorAction SilentlyContinue
 if ($ep -eq 'Restricted' -or $ep -eq 'AllSigned') {
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
@@ -150,6 +150,26 @@ function Invoke-Uninstall {
     }
 }
 
+function Add-BomIfMissing {
+    <#
+    .SYNOPSIS
+        Add UTF-8 BOM to a file if it doesn't already have one.
+    .DESCRIPTION
+        Windows PowerShell 5.1 reads files as GB2312 by default.
+        GitHub raw files are UTF-8 without BOM, causing Chinese characters to garble.
+        This function prepends UTF-8 BOM (EF BB BF) to tell PowerShell to use UTF-8.
+    #>
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    # Check if first 3 bytes are UTF-8 BOM: EF BB BF (239, 187, 191)
+    if ($bytes[0] -ne 239 -or $bytes[1] -ne 187 -or $bytes[2] -ne 191) {
+        $bom = [byte[]](239, 187, 191)
+        $newBytes = $bom + $bytes
+        [System.IO.File]::WriteAllBytes($Path, $newBytes)
+    }
+}
+
 function Invoke-Download {
     <#
     .SYNOPSIS
@@ -255,6 +275,11 @@ function Invoke-Install {
     $gotoGithubPs1Path = "$InstallDir\goto-github.ps1"
     $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path
 
+    # Add UTF-8 BOM to prevent Chinese character garbling on Windows PS 5.1
+    if ($ps1Success) {
+        Add-BomIfMissing -Path $gotoGithubPs1Path
+    }
+
     if (-not $fetchSuccess) {
         Write-ErrorMsg "Installation failed. Check your network connection and try again."
         Write-Host ""
@@ -310,6 +335,11 @@ function Main {
 
         Write-Step "Updating goto-github.ps1..."
         $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path
+
+        # Add UTF-8 BOM to prevent Chinese character garbling on Windows PS 5.1
+        if ($ps1Success) {
+            Add-BomIfMissing -Path $gotoGithubPs1Path
+        }
 
         if ($fetchSuccess) {
             Write-Success "fetch.sh updated successfully!"
