@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     One-line installer for GoToGitHub — GitHub access acceleration tool for Windows.
     Supports multiple mirror sources for regions with GitHub access issues.

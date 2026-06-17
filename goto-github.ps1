@@ -1,4 +1,4 @@
-﻿# GoToGitHub — Pure PowerShell hosts fetch script
+# GoToGitHub — Pure PowerShell hosts fetch script
 # Fetches verified GitHub CDN IPs from community-maintained hosts sources and
 # applies them to the Windows hosts file. No Git Bash required.
 
