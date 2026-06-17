@@ -4,6 +4,12 @@
 
 #Requires -Version 5.1
 
+# ── Self-unblock: bypass Restricted/AllSigned execution policy ────────────────
+$_ep = Get-ExecutionPolicy
+if ($_ep -eq 'Restricted' -or $_ep -eq 'AllSigned') {
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+}
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 $script:HOSTS_FILE = "$env:SystemRoot\System32\drivers\etc\hosts"
 $script:MARKER_START = '# >>> goto-github >>>'
