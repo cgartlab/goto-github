@@ -1,102 +1,102 @@
 {
-  "updated_at": "2026-06-16T22:54:18.156349+00:00",
-  "github_actions_run": "27653492383",
+  "updated_at": "2026-06-17T04:19:44.348634+00:00",
+  "github_actions_run": "27665508915",
   "servers": {
     "github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "www.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "gist.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "alive.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "live.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "central.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "collector.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "github.community": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "desktop.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "education.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "status.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "docs.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "cli.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "copilot.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "login.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "partner.github.com": {
       "mode": "hosts",
-      "best_ip": "140.82.112.20",
-      "best_time": 0.3142,
-      "best_size": 563763
+      "best_ip": "140.82.114.4",
+      "best_time": 0.1268,
+      "best_size": 563769
     },
     "raw.githubusercontent.com": {
       "mode": "hosts",
@@ -141,7 +141,7 @@
       "best_size": null
     }
   },
-  "hosts_block": "# >>> goto-github >>>\n# Managed by goto-github \u2014 do not edit manually\n# Updated at 2026-06-16T22:54:18.156307+00:00\n# Download acceleration: multi-group IP optimization enabled\n140.82.112.20   github.com www.github.com gist.github.com alive.github.com live.github.com central.github.com collector.github.com github.community desktop.github.com education.github.com status.github.com docs.github.com cli.github.com copilot.github.com login.github.com partner.github.com\n# DNS domains (not pinned):\n#   api.github.com pipelines.actions.githubusercontent.com\n# <<< goto-github <<<",
+  "hosts_block": "# >>> goto-github >>>\n# Managed by goto-github \u2014 do not edit manually\n# Updated at 2026-06-17T04:19:44.348595+00:00\n# Download acceleration: multi-group IP optimization enabled\n140.82.114.4    github.com www.github.com gist.github.com alive.github.com live.github.com central.github.com collector.github.com github.community desktop.github.com education.github.com status.github.com docs.github.com cli.github.com copilot.github.com login.github.com partner.github.com\n# DNS domains (not pinned):\n#   api.github.com pipelines.actions.githubusercontent.com\n# <<< goto-github <<<",
   "meta": {
     "groups_optimized": 1,
     "total_groups": 5,
