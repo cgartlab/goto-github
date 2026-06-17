@@ -44,6 +44,17 @@ is_mingw()  { [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; }
 is_root()   { [ "$(id -u)" -eq 0 ]; }
 is_tty()    { [ -t 0 ]; }
 
+# ── Privilege escalation ─────────────────────────────────────────────────────
+# Re-exec with sudo, preserving HOSTS_FILE env var if set.
+need_root() {
+    [ "$(id -u)" -eq 0 ] && return 0
+    if [ -n "${HOSTS_FILE:-}" ]; then
+        exec sudo -E "$0" "$@"   # preserve HOSTS_FILE across sudo boundary
+    else
+        exec sudo "$0" "$@"
+    fi
+}
+
 detect_platform_str() {
     if is_macos; then
         echo "macOS"
@@ -107,6 +118,41 @@ flush_dns() {
     log_info "DNS cache flushed"
 }
 
+# ── PowerShell subcommand interface ──────────────────────────────────────────
+# Outputs machine-parseable JSON for --pwsh status
+json_status() {
+    local ip http_code reachable="false" error=""
+
+    ip=$(grep -m1 "github.com" "$HOSTS_FILE" 2>/dev/null | awk '{print $1}')
+    if [ -z "$ip" ]; then
+        ip=""
+    else
+        http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
+            --resolve "github.com:443:$ip" \
+            -o /dev/null -w "%{http_code}" \
+            "https://github.com/" 2>/dev/null) || http_code=""
+        if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+            http_code="000"
+        fi
+        [ "$http_code" = "200" ] && reachable="true"
+    fi
+
+    # Detect if block exists
+    local block_exists="false"
+    if grep -q "$MARKER_START" "$HOSTS_FILE" 2>/dev/null; then
+        block_exists="true"
+    fi
+
+    cat <<EOF
+{
+  "installed": $block_exists,
+  "ip": "$ip",
+  "reachable": $reachable,
+  "http_code": "$http_code"
+}
+EOF
+}
+
 # ── Remove existing goto-github block from hosts file ────────────────────────
 remove_block() {
     if ! grep -qF "$MARKER_START" "$HOSTS_FILE" 2>/dev/null; then
@@ -162,6 +208,8 @@ show_status() {
 apply_hosts() {
     local block="$1"
     remove_block
+    # Backup before modification
+    cp "$HOSTS_FILE" "${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
     printf "\n%s\n" "$block" >> "$HOSTS_FILE"
     log_info "Applied to $HOSTS_FILE"
 }
@@ -230,50 +278,80 @@ build_hosts_block() {
 
 # ── Interactive menu ──────────────────────────────────────────────────────────
 
-show_menu_header() {
-    local platform
-    local installed
-    platform=$(detect_platform_str)
-    if [ -f "$HOSTS_FILE" ] && grep -qF "$MARKER_START" "$HOSTS_FILE" 2>/dev/null; then
-        installed="已安装"
-    else
-        installed="未安装"
-    fi
-
+show_menu() {
     echo ""
     echo "========================================"
-    echo "         GoToGitHub — GitHub 加速工具"
+    echo "  🔗 GitHub 访问加速"
     echo "========================================"
-    echo "  平台: $platform"
-    echo "  状态: $installed"
-    echo "----------------------------------------"
-    echo "  请选择操作:"
     echo ""
-    echo "    1) 🚀  自动驾驶 (Auto-pilot)"
-    echo "        自动检测平台，一键完成全部操作"
+    echo "  1) 🚀 一键加速（推荐）"
+    echo "  2) 🔧 手动选择数据源"
+    echo "  3) 🗑️  恢复 hosts（移除加速）"
+    echo "  4) 📊 查看当前状态"
     echo ""
-    echo "    2) 🔧  手动选择 (Manual)"
-    echo "        自选数据源，管理 hosts 条目"
+    echo "  Q) 🚪 退出"
     echo ""
-    echo "    3) ⚡  一键加速 (One-click)"
-    echo "        sudo 模式，适合熟练用户"
-    echo ""
-    echo "----------------------------------------"
-    echo -n "  请输入 [1-3] (默认 1): "
 }
 
-show_menu() {
+interactive_menu() {
+    show_menu
+    echo -n "  请输入选项 [1-4, Q]: "
     local choice
-    show_menu_header
     read -r choice
-    choice="${choice:-1}"
     echo ""
-    case "$choice" in
-        1) auto_drive ;;
-        2) manual_select ;;
-        3) one_click_accelerate ;;
-        *) log_error "无效选项: $choice"; echo ""; show_menu ;;
+
+    case "${choice:-}" in
+        1|'')
+            one_click_accelerate
+            ;;
+        2)
+            manual_select
+            ;;
+        3)
+            restore_hosts
+            flush_dns
+            echo ""
+            echo "✅ 已恢复原始 hosts 文件"
+            echo ""
+            ;;
+        4)
+            show_status
+            ;;
+        Q|q)
+            echo "已退出"
+            exit 0
+            ;;
+        *)
+            echo "无效选项，请输入 1-4 或 Q"
+            echo ""
+            ;;
     esac
+}
+
+# ── Core cycle ─────────────────────────────────────────────────────────────
+# run_cycle SILENT: if true, suppress "验证未完全通过" warning and exit 0
+run_cycle() {
+    local silent="${1:-false}"
+    local raw_content block
+    raw_content=$(fetch_hosts_content) || {
+        log_error "所有数据源均不可用，请检查网络连接后重试。"
+        exit 1
+    }
+    block=$(build_hosts_block "$raw_content")
+    apply_hosts "$block"
+    flush_dns
+    echo ""
+    if verify_hosts; then
+        echo "========================================"
+        echo "  ✅ 加速成功！GitHub 已可正常访问"
+        echo "========================================"
+        echo ""
+    else
+        log_warn "加速已应用，但验证未完全通过。"
+        echo "  提示: 运行 ./fetch.sh --status 查看详情"
+        [ "$silent" = "true" ] && return 0
+        return 1
+    fi
 }
 
 auto_drive() {
@@ -291,32 +369,12 @@ auto_drive() {
             echo ""
             exit 1
         fi
-        # macOS / Linux: re-exec with sudo
         log_info "需要管理员权限，正在请求 sudo..."
-        exec sudo "$0" --__auto
-        # exec does not return
+        need_root "$0" --__cycle
+        return
     fi
 
-    # --- We are root from here ---
-    local raw_content block
-    raw_content=$(fetch_hosts_content) || {
-        log_error "所有数据源均不可用，请检查网络连接后重试。"
-        exit 1
-    }
-    block=$(build_hosts_block "$raw_content")
-    apply_hosts "$block"
-    flush_dns
-    echo ""
-    if verify_hosts; then
-        echo ""
-        echo "========================================"
-        echo "  ✅ 加速成功！GitHub 已可正常访问"
-        echo "========================================"
-        echo ""
-    else
-        log_warn "加速已应用，但验证未完全通过。"
-        echo "  提示: 运行 ./fetch.sh --status 查看详情"
-    fi
+    run_cycle false
 }
 
 manual_select() {
@@ -345,7 +403,8 @@ manual_select() {
                     log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
                     exit 1
                 fi
-                exec sudo "$0" --__manual "remove"
+                need_root "$0" --__manual "remove"
+                return
             fi
             remove_block && flush_dns
             log_info "已删除 goto-github 条目"
@@ -361,7 +420,8 @@ manual_select() {
                 log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
                 exit 1
             fi
-            exec sudo "$0" --__manual "$selected_source"
+            need_root "$0" --__manual "$selected_source"
+            return
         fi
 
         log_info "使用数据源: $selected_source"
@@ -390,33 +450,41 @@ manual_select() {
 }
 
 one_click_accelerate() {
-    if is_root; then
-        local raw_content block
-        raw_content=$(fetch_hosts_content) || exit 1
-        block=$(build_hosts_block "$raw_content")
-        apply_hosts "$block"
-        flush_dns
-        verify_hosts || true
-    elif is_mingw; then
-        log_error "需要管理员权限。"
-        echo ""
-        echo "  请右键点击 Git Bash，选择「以管理员身份运行」，然后执行:"
-        echo ""
-        echo "    cd $(pwd)"
-        echo "    ./fetch.sh"
-        echo ""
+    if ! is_root; then
+        if is_mingw; then
+            log_error "需要管理员权限。"
+            echo ""
+            echo "  请右键点击 Git Bash，选择「以管理员身份运行」，然后执行:"
+            echo ""
+            echo "    cd $(pwd)"
+            echo "    ./fetch.sh"
+            echo ""
+        else
+            log_info "正在请求 sudo..."
+            need_root "$0" --__cycle
+        fi
+        return
+    fi
+
+    run_cycle true   # silent=true: suppress warning, exit 0
+}
+
+# ── Restore hosts (remove goto-github block) ──────────────────────────────────
+restore_hosts() {
+    if grep -qF "$MARKER_START" "$HOSTS_FILE" 2>/dev/null; then
+        remove_block
+        log_info "已恢复原始 hosts 文件"
     else
-        log_info "正在请求 sudo..."
-        exec sudo "$0" --__auto
+        log_info "未找到 goto-github 条目，无需恢复"
     fi
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
     case "${1:-}" in
-        --__auto)
-            # Internal: auto-drive mode (after sudo re-exec)
-            auto_drive
+        --__cycle)
+            # Internal: run_cycle mode (after sudo re-exec)
+            run_cycle false
             ;;
         --__manual)
             # Internal: manual mode with pre-selected source (after sudo re-exec)
@@ -455,14 +523,60 @@ main() {
                 log_info "No goto-github entries found"
             fi
             ;;
+        --pwsh)
+            # PowerShell thin-wrapper interface: output machine-parseable format
+            shift
+            case "${1:-auto}" in
+                auto)
+                    # PowerShell auto-drive: same as run_cycle but from PS
+                    if ! is_root; then
+                        echo '{"error":"need_root","message":"run with sudo"}' >&2
+                        exit 1
+                    fi
+                    # Silent fetch and apply
+                    local raw_content block
+                    raw_content=$(fetch_hosts_content 2>/dev/null) || {
+                        echo '{"error":"fetch_failed","message":"All sources exhausted"}' >&2
+                        exit 1
+                    }
+                    block=$(build_hosts_block "$raw_content")
+                    apply_hosts "$block" >/dev/null 2>&1
+                    flush_dns >/dev/null 2>&1
+                    verify_hosts >/dev/null 2>&1
+                    echo '{"success":true}'
+                    ;;
+                status)
+                    json_status
+                    ;;
+                restore)
+                    if ! is_root; then
+                        echo '{"error":"need_root","message":"run with sudo"}' >&2
+                        exit 1
+                    fi
+                    remove_block
+                    flush_dns >/dev/null 2>&1
+                    echo '{"restored":true}'
+                    ;;
+                source)
+                    # Output current source selection
+                    echo '{"source":"jsdelivr","fallback":"hellogithub"}'
+                    ;;
+                *)
+                    echo "{\"error\":\"unknown_subcommand\",\"message\":\"Usage: --pwsh auto|status|restore|source\"}" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
         --help|-h)
-            echo "Usage: $0 [--status|--restore|--help]"
+            echo "Usage: $0 [--status|--restore|--pwsh SUBCMD|--version|--help]"
             echo ""
-            echo "  (no flags)     Interactive menu (auto-pilot, manual, one-click)"
+            echo "  (no flags)     Interactive menu (1234Q keys)"
             echo "                 Non-TTY / CI: runs full cycle if root"
-            echo "  --status       Show current IP and connectivity status"
-            echo "  --restore      Remove goto-github entries from /etc/hosts"
-            echo "  --help         Show this help"
+            echo "  --pwsh SUBCMD  PowerShell 接口（auto|status|restore|source）"
+            echo "  --status       显示当前状态"
+            echo "  --restore      恢复 hosts 文件"
+            echo "  --version      显示版本"
+            echo "  -h, --help     显示帮助"
             echo ""
             echo "Data sources (mirror list with automatic fallback):"
             echo "  https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts"
@@ -474,28 +588,19 @@ main() {
             echo "Platforms: macOS · Linux · Git Bash (Windows)"
             ;;
         "")
-            # TTY: show interactive menu; non-TTY: run full cycle if root
+            # Interactive menu (TTY) or one-click (non-TTY with sudo)
             if is_tty; then
-                show_menu
-            elif ! is_root; then
+                interactive_menu
+            elif is_root; then
+                run_cycle false
+            else
                 log_error "This operation requires sudo. Run: sudo $0"
                 exit 1
-            else
-                local raw_content block
-                raw_content=$(fetch_hosts_content) || exit 1
-                block=$(build_hosts_block "$raw_content") || exit 1
-                apply_hosts "$block"
-                flush_dns
-                if verify_hosts; then
-                    log_info "Done. Run '$0 --status' to verify."
-                else
-                    log_warn "Applied but verification failed. Check your network or try again."
-                fi
             fi
             ;;
         *)
             log_error "Unknown option: $1"
-            echo "Usage: $0 [--status|--restore|--help]"
+            echo "Usage: $0 [--status|--restore|--pwsh|--help]"
             exit 1
             ;;
     esac

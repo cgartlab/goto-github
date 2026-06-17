@@ -2,6 +2,18 @@
 
 GitHub 访问加速工具。实时从社区维护的 hosts 源获取 GitHub 域名映射，写入本地 `/etc/hosts`，无需本地扫描。
 
+## 一键安装
+
+**macOS / Linux (Git Bash):**
+```bash
+curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash
+```
+
+**Windows PowerShell:**
+```powershell
+irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 | iex
+```
+
 ## 一句话说明
 
 ```
@@ -10,7 +22,7 @@ sudo ./fetch.sh              # 拉取 → 写入 hosts → 刷新 DNS
 sudo ./fetch.sh --restore   # 移除 goto-github 条目
 ```
 
-## 工作原理
+## 手动使用
 
 ```
 数据源（jsDelivr CDN 加速）→ fetch.sh → 内容验证 → 写入 /etc/hosts → DNS 刷新
@@ -43,6 +55,19 @@ sudo ./fetch.sh --restore   # 移除 goto-github 条目
 ## 平台
 
 macOS · Linux · Git Bash (Windows)
+
+## Windows 说明
+
+Windows 用户推荐使用 PowerShell wrapper：
+
+```powershell
+# 安装
+irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 | iex
+
+# 使用
+.\goto-github.ps1           # 交互菜单
+.\goto-github.ps1 --pwsh status  # JSON 状态（脚本用）
+```
 
 ## 许可证
 
