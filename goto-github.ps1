@@ -80,8 +80,8 @@ function Request-Admin {
         Write-Host "  → 如果弹出 UAC 提示，请点击「是」" -ForegroundColor Yellow
         exit 0
     }
-    Write-Host "  → 已取消。请以管理员身份重新运行此脚本。" -ForegroundColor Yellow
-    exit 1
+    Write-Host "  → 已取消。" -ForegroundColor Yellow
+    return $false
 }
 
 # ── Content Validation ────────────────────────────────────────────────────────
@@ -436,29 +436,30 @@ function Start-InteractiveMenu {
             { $_ -eq '1' -or $_ -eq '' } {
                 Start-OneClickAccelerate
                 Write-Host ""
-                Write-Host "按 Enter 继续..."
-                Read-Host
+                Write-Host "按 Q 返回主菜单，或按 Enter 继续..." -ForegroundColor Cyan
+                $cont = Read-Host
+                if ($cont -eq 'Q' -or $cont -eq 'q') { }
             }
             { $_ -eq '2' } {
                 Start-ManualSelect
                 Write-Host ""
-                Write-Host "按 Enter 继续..."
-                Read-Host
+                Write-Host "按 Q 返回主菜单，或按 Enter 继续..." -ForegroundColor Cyan
+                $cont = Read-Host
+                if ($cont -eq 'Q' -or $cont -eq 'q') { }
             }
             { $_ -eq '3' } {
                 Start-RestoreHosts
-                Clear-DnsCache | Out-Null
                 Write-Host ""
-                Write-Host "✅ 已恢复原始 hosts 文件" -ForegroundColor Green
-                Write-Host ""
-                Write-Host "按 Enter 继续..."
-                Read-Host
+                Write-Host "按 Q 返回主菜单，或按 Enter 继续..." -ForegroundColor Cyan
+                $cont = Read-Host
+                if ($cont -eq 'Q' -or $cont -eq 'q') { }
             }
             { $_ -eq '4' } {
                 Show-Status
                 Write-Host ""
-                Write-Host "按 Enter 继续..."
-                Read-Host
+                Write-Host "按 Q 返回主菜单，或按 Enter 继续..." -ForegroundColor Cyan
+                $cont = Read-Host
+                if ($cont -eq 'Q' -or $cont -eq 'q') { }
             }
             { $_ -eq 'Q' -or $_ -eq 'q' } {
                 Write-Host ""
@@ -477,7 +478,12 @@ function Start-InteractiveMenu {
 
 function Start-OneClickAccelerate {
     if (-not (Test-IsAdmin)) {
-        Request-Admin
+        $result = Request-Admin
+        if (-not $result) {
+            Write-Host ""
+            Write-Host "  ⚠ 操作已取消，需要管理员权限才能继续。" -ForegroundColor Yellow
+            Write-Host ""
+        }
         return
     }
 
@@ -492,6 +498,8 @@ function Start-OneClickAccelerate {
             Write-Host "  ✅ GitHub 加速已成功应用！" -ForegroundColor Green
             Write-Host "========================================" -ForegroundColor Green
             Write-Host ""
+            Write-Host "  现在可以访问 GitHub 了！" -ForegroundColor White
+            Write-Host ""
         } else {
             Write-Host ""
             Write-Host "  ⚠ 加速已应用，但验证未完全通过。" -ForegroundColor Yellow
@@ -500,8 +508,12 @@ function Start-OneClickAccelerate {
         }
     } else {
         Write-Host ""
-        Write-Host "  ❌ 加速失败: 所有数据源均不可用" -ForegroundColor Red
-        Write-Host "  请检查网络连接后重试" -ForegroundColor Cyan
+        Write-Host "  ❌ 加速失败：所有数据源均不可用" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  可能原因：" -ForegroundColor White
+        Write-Host "    1) 您的网络无法访问 GitHub（如公司内网/代理环境）" -ForegroundColor Gray
+        Write-Host "    2) DNS 被污染，建议先运行 --pwsh status 查看" -ForegroundColor Gray
+        Write-Host "    3) 稍后重试，或使用「手动选择」尝试备用源" -ForegroundColor Gray
         Write-Host ""
     }
 }
@@ -532,12 +544,19 @@ function Start-ManualSelect {
         }
         '3' {
             if (-not (Test-IsAdmin)) {
-                Request-Admin
+                $result = Request-Admin
+                if (-not $result) {
+                    Write-Host ""
+                    Write-Host "  ⚠ 操作已取消。" -ForegroundColor Yellow
+                    Write-Host ""
+                }
                 return
             }
             Remove-GotoBlock | Out-Null
             Clear-DnsCache | Out-Null
-            Log-Info "已删除 goto-github 条目"
+            Write-Host ""
+            Write-Host "  ✅ 已删除 goto-github 条目" -ForegroundColor Green
+            Write-Host ""
             return
         }
         '4' {
@@ -551,11 +570,16 @@ function Start-ManualSelect {
 
     if ($selectedSource) {
         if (-not (Test-IsAdmin)) {
-            Request-Admin
+            $result = Request-Admin
+            if (-not $result) {
+                Write-Host ""
+                Write-Host "  ⚠ 操作已取消。" -ForegroundColor Yellow
+                Write-Host ""
+            }
             return
         }
 
-        Log-Info "使用数据源: $selectedSource"
+        Write-Host "  使用数据源: $selectedSource" -ForegroundColor Cyan
 
         try {
             $response = Invoke-WebRequest -Uri $selectedSource -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
@@ -567,7 +591,9 @@ function Start-ManualSelect {
             }
 
             if (-not (Test-ValidHostsContent -Content $content)) {
-                Log-Error "该源数据格式不正确。"
+                Write-Host ""
+                Write-Host "  ❌ 该源数据格式不正确。" -ForegroundColor Red
+                Write-Host ""
                 return
             }
 
@@ -575,25 +601,44 @@ function Start-ManualSelect {
             Remove-GotoBlock | Out-Null
             Add-HostsBlock -Lines $block | Out-Null
             Clear-DnsCache | Out-Null
-            Test-HostsVerification | Out-Null
+            if (Test-HostsVerification) {
+                Write-Host ""
+                Write-Host "  ✅ GitHub 加速已成功应用！" -ForegroundColor Green
+                Write-Host ""
+            } else {
+                Write-Host ""
+                Write-Host "  ⚠ 加速已应用，但验证未完全通过。" -ForegroundColor Yellow
+                Write-Host ""
+            }
 
         } catch {
-            Log-Error "从该源获取数据失败: $($_.Exception.Message)"
+            Write-Host ""
+            Write-Host "  ❌ 从该源获取数据失败: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host ""
         }
     }
 }
 
 function Start-RestoreHosts {
     if (-not (Test-IsAdmin)) {
-        Request-Admin
+        $result = Request-Admin
+        if (-not $result) {
+            Write-Host ""
+            Write-Host "  ⚠ 操作已取消。" -ForegroundColor Yellow
+            Write-Host ""
+        }
         return
     }
 
     if (Test-BlockExists) {
         Remove-GotoBlock | Out-Null
-        Log-Info "已恢复原始 hosts 文件"
+        Write-Host ""
+        Write-Host "  ✅ 已恢复原始 hosts 文件" -ForegroundColor Green
+        Write-Host ""
     } else {
-        Log-Info "未找到 goto-github 条目，无需恢复"
+        Write-Host ""
+        Write-Host "  ℹ 未找到 goto-github 条目，无需恢复" -ForegroundColor Cyan
+        Write-Host ""
     }
 }
 
