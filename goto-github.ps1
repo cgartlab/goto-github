@@ -210,7 +210,12 @@ function Get-HostsContent {
         Log-Info "Fetching from $url"
         try {
             $response = Invoke-WebRequest -Uri $url -TimeoutSec 30 -UseBasicParsing -ErrorAction SilentlyContinue
-            $content = $response.Content
+            $raw = $response.Content
+            if ($raw -is [byte[]]) {
+                $content = [System.Text.Encoding]::UTF8.GetString($raw)
+            } else {
+                $content = [string]$raw
+            }
             if ([string]::IsNullOrWhiteSpace($content)) {
                 Log-Warn "Failed to fetch from $url (empty content)"
                 continue
@@ -554,7 +559,12 @@ function Start-ManualSelect {
 
         try {
             $response = Invoke-WebRequest -Uri $selectedSource -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
-            $content = $response.Content
+            $raw = $response.Content
+            if ($raw -is [byte[]]) {
+                $content = [System.Text.Encoding]::UTF8.GetString($raw)
+            } else {
+                $content = [string]$raw
+            }
 
             if (-not (Test-ValidHostsContent -Content $content)) {
                 Log-Error "该源数据格式不正确。"
