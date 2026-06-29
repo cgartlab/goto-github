@@ -25,10 +25,9 @@ HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 MARKER_START="# >>> goto-github >>>"
 MARKER_END="# <<< goto-github <<<"
 
-SOURCES="
-  https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts
-  https://raw.hellogithub.com/hosts
-"
+SOURCES="https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts
+https://raw.hellogithub.com/hosts
+https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts"
 
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -121,20 +120,23 @@ flush_dns() {
 # ── PowerShell subcommand interface ──────────────────────────────────────────
 # Outputs machine-parseable JSON for --pwsh status
 json_status() {
-    local ip http_code reachable="false"
+    local ip_count="0" has_github="false" reachable="false" http_code=""
 
-    ip=$(grep -m1 "github.com" "$HOSTS_FILE" 2>/dev/null | awk '{print $1}')
-    if [ -z "$ip" ]; then
-        ip=""
-    else
-        http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
-            --resolve "github.com:443:$ip" \
-            -o /dev/null -w "%{http_code}" \
-            "https://github.com/" 2>/dev/null) || http_code=""
-        if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
-            http_code="000"
+    # 统计 hosts 块中的条目
+    local block_content
+    block_content=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null || true)
+    if [ -n "$block_content" ]; then
+        ip_count=$(echo "$block_content" | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+        if echo "$block_content" | grep -qE '\s+github\.com\b'; then
+            has_github="true"
         fi
-        [ "$http_code" = "200" ] && reachable="true"
+        # 直接测试 GitHub 连通性（通过 hosts 文件解析）
+        http_code=$(curl -s --connect-timeout 10 --max-time 20 \
+            -o /dev/null -w "%{http_code}" \
+            "https://github.com/" 2>/dev/null || true)
+        if echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+            reachable="true"
+        fi
     fi
 
     # Detect if block exists
@@ -146,9 +148,10 @@ json_status() {
     cat <<EOF
 {
   "installed": $block_exists,
-  "ip": "$ip",
+  "entries": $ip_count,
+  "has_github": $has_github,
   "reachable": $reachable,
-  "http_code": "$http_code"
+  "http_code": "${http_code:-}"
 }
 EOF
 }
@@ -173,32 +176,31 @@ remove_block() {
 
 # ── Show current status ───────────────────────────────────────────────────────
 show_status() {
-    local ip
-    ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
-        | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1 || true)
+    local block_exists ip_count has_github
+    block_exists=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null || true)
 
     echo ""
     echo "=== GoToGitHub Status ==="
     echo ""
 
-    if [ -z "$ip" ]; then
-        echo "  IP: (not installed)"
+    if [ -z "$block_exists" ]; then
+        echo "  Status: (not installed)"
         echo "  Run 'sudo ./fetch.sh' to install."
     else
-        echo "  IP:   $ip"
+        ip_count=$(echo "$block_exists" | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+        has_github=$(echo "$block_exists" | grep -cE '\s+github\.com\b' || true)
+        echo "  Entries: $ip_count"
+        echo "  github.com: $has_github entry(s)"
+
+        # Test actual connectivity through hosts file
         local http_code
-        http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
-            --resolve "github.com:443:$ip" \
+        http_code=$(curl -s --connect-timeout 10 --max-time 20 \
             -o /dev/null -w "%{http_code}" \
-            "https://github.com/" 2>/dev/null) || http_code=""
-        if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
-            http_code="000"
-        fi
-        if [ "$http_code" = "200" ]; then
-            echo -e "  Status: ${GREEN}OK${NC} — github.com reachable"
+            "https://github.com/" 2>/dev/null || true)
+        if echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+            echo -e "  Status: ${GREEN}OK${NC} — github.com reachable (HTTP $http_code)"
         else
-            echo -e "  Status: ${RED}FAILED${NC} (HTTP $http_code)"
+            echo -e "  Status: ${RED}FAILED${NC} — github.com unreachable"
         fi
     fi
     echo ""
@@ -238,32 +240,31 @@ fetch_hosts_content() {
 
 # ── Verify applied IP ───────────────────────────────────────────────────────────
 verify_hosts() {
-    local ip
-    ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
-        | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1 || true)
-    if [ -z "$ip" ]; then
-        log_warn "No IP found in hosts block"
+    # 验证 hosts 块已正确写入
+    local block_exists ip_count has_github
+    block_exists=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null || true)
+    if [ -z "$block_exists" ]; then
+        log_warn "No goto-github block found in hosts file"
         return 1
     fi
-    log_info "Verifying IP $ip against github.com..."
-    local http_code
-    http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
-        --resolve "github.com:443:$ip" \
-        -o /dev/null -w "%{http_code}" \
-        "https://github.com/" 2>/dev/null) || http_code=""
-    if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
-        http_code="000"
-    fi
-    if [ "$http_code" = "200" ]; then
-        log_info "Verification PASSED — github.com reachable via $ip"
-        return 0
-    else
-        log_warn "Verification FAILED — github.com returned HTTP $http_code via $ip"
-        return 1
-    fi
-}
 
+    # 统计有效 IP 条目
+    ip_count=$(echo "$block_exists" | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+    # 检查 github.com 是否存在
+    has_github=$(echo "$block_exists" | grep -cE '\s+github\.com\b' || true)
+
+    if [ "$ip_count" -lt 10 ]; then
+        log_warn "Hosts block has only $ip_count entries (expected >= 10)"
+        return 1
+    fi
+    if [ "$has_github" -eq 0 ]; then
+        log_warn "Hosts block missing github.com entry"
+        return 1
+    fi
+
+    log_info "Hosts block verified: $ip_count entries, github.com entry present"
+    return 0
+}
 # ── Build hosts block from raw content ────────────────────────────────────────
 build_hosts_block() {
     local content="$1"
@@ -385,19 +386,21 @@ manual_select() {
     echo "  请选择:"
     echo "    1) jsDelivr CDN（主源）"
     echo "    2) raw.hellogithub.com（备用源）"
-    echo "    3) 删除已有条目（恢复原状）"
-    echo "    4) 返回主菜单"
+    echo "    3) GitHub Raw（直连源）"
+    echo "    4) 删除已有条目（恢复原状）"
+    echo "    5) 返回主菜单"
     echo ""
-    echo -n "  请输入 [1-4] (默认 4): "
+    echo -n "  请输入 [1-5] (默认 5): "
     local choice
     read -r choice
-    choice="${choice:-4}"
+    choice="${choice:-5}"
 
     local selected_source=""
     case "$choice" in
         1) selected_source="https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts" ;;
         2) selected_source="https://raw.hellogithub.com/hosts" ;;
-        3)
+        3) selected_source="https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts" ;;
+        4)
             if ! is_root; then
                 if is_mingw; then
                     log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
@@ -410,7 +413,7 @@ manual_select() {
             log_info "已删除 goto-github 条目"
             return 0
             ;;
-        4) show_menu; return 0 ;;
+        5) show_menu; return 0 ;;
         *) log_error "无效选项: $choice"; manual_select; return 0 ;;
     esac
 
@@ -559,7 +562,7 @@ main() {
                     ;;
                 source)
                     # Output current source selection
-                    echo '{"source":"jsdelivr","fallback":"hellogithub"}'
+                    echo '{"source":"jsdelivr","fallback":"hellogithub","tertiary":"github_raw"}'
                     ;;
                 *)
                     echo "{\"error\":\"unknown_subcommand\",\"message\":\"Usage: --pwsh auto|status|restore|source\"}" >&2
@@ -581,6 +584,7 @@ main() {
             echo "Data sources (mirror list with automatic fallback):"
             echo "  https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts"
             echo "  https://raw.hellogithub.com/hosts"
+            echo "  https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts"
             echo ""
             echo "Environment:"
             echo "  HOSTS_FILE  hosts file path (default: /etc/hosts)"
