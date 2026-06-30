@@ -30,7 +30,7 @@ https://raw.hellogithub.com/hosts
 https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts"
 
 # Colors
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -72,6 +72,115 @@ cleanup() {
     exit 0
 }
 trap cleanup INT TERM
+
+# ── TCP reachability test ──────────────────────────────────────────────────────
+# Returns 0 if IP:port is reachable, 1 if not.
+test_tcp_reachable() {
+    local ip="$1"
+    local port="${2:-443}"
+    local timeout="${3:-3}"
+    if command -v nc >/dev/null 2>&1; then
+        nc -z -w "$timeout" "$ip" "$port" 2>/dev/null
+    else
+        # Fallback: use curl to test connection (exit code 0 = success, 22 = HTTP error = TCP worked)
+        local rc=0
+        curl -s --connect-timeout "$timeout" --max-time "$((timeout + 2))" \
+            -o /dev/null "https://${ip}:${port}/" 2>/dev/null || rc=$?
+        [ "$rc" -eq 0 ] || [ "$rc" -eq 22 ]
+    fi
+}
+
+# ── Filter dead core domain IPs from hosts content ────────────────────────────
+# Removes lines for core domains (github.com, api.github.com, etc.) whose IPs
+# are unreachable. CDN domains (avatars, raw, objects) are NOT checked.
+# Returns filtered content on stdout; returns 1 if ALL core IPs are dead.
+CORE_DOMAINS="github.com api.github.com gist.github.com codeload.github.com"
+
+filter_dead_core_ips() {
+    local content="$1"
+    local line ip domain
+    local dead_core_count=0
+    local total_core_count=0
+
+    while IFS= read -r line; do
+        # Skip empty lines and comments
+        [ -z "$line" ] && continue
+        [[ "$line" =~ ^# ]] && continue
+
+        # Extract IP and domain
+        ip=$(echo "$line" | awk '{print $1}')
+        domain=$(echo "$line" | awk '{print $2}')
+
+        # Check if this is a core domain
+        if echo "$CORE_DOMAINS" | grep -q "\b${domain}\b"; then
+            total_core_count=$((total_core_count + 1))
+            if ! test_tcp_reachable "$ip" "443" "3"; then
+                echo -e "${YELLOW}[WARN]${NC} Skipping $domain (unreachable IP: $ip)" >&2
+                dead_core_count=$((dead_core_count + 1))
+                continue
+            fi
+        fi
+
+        echo "$line"
+    done <<< "$content"
+
+    if [ "$total_core_count" -gt 0 ] && [ "$dead_core_count" -eq "$total_core_count" ]; then
+        echo -e "${YELLOW}[WARN]${NC} All core domain IPs are unreachable in this source" >&2
+        return 1
+    fi
+    return 0
+}
+
+# ── Verify domain IPs with live progress display ─────────────────────────────
+# Tests core GitHub domains against IPs from hosts content.
+# Returns: 0=all passed, 1=partial, 2=all failed
+# All output goes to stderr (stdout reserved for content return)
+test_domain_ips() {
+    local raw_content="$1"
+    local -a domains=("github.com" "api.github.com" "codeload.github.com")
+    local passed=0 failed=0 skipped=0
+
+    printf "\n" >&2
+    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    printf "  ${CYAN}  🔍 正在测试域名连通性...${NC}\n" >&2
+    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+
+    for domain in "${domains[@]}"; do
+        local ip http_code
+        ip=$(echo "$raw_content" | grep -m1 -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\s+${domain}\b" | awk '{print $1}')
+        if [ -z "$ip" ]; then
+            printf "  ${YELLOW}  −${NC}  %-24s (该源未包含此域名)\n" "$domain" >&2
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        printf "  ${CYAN}  ○${NC}  测试 %s → %s ... " "$domain" "$ip" >&2
+
+        http_code=$(curl -s --connect-timeout 5 --max-time 8 \
+            -o /dev/null -w "%{http_code}" \
+            "https://${domain}/" 2>/dev/null || echo "000")
+
+        if [ "$http_code" != "000" ] && [ -n "$http_code" ]; then
+            printf "\r  ${GREEN}  ✓${NC}  %-24s → %-16s (HTTP %s)\n" "$domain" "$ip" "$http_code" >&2
+            passed=$((passed + 1))
+        else
+            printf "\r  ${RED}  ✗${NC}  %-24s → %-16s ${RED}连接超时${NC}\n" "$domain" "$ip" >&2
+            failed=$((failed + 1))
+        fi
+    done
+
+    printf "\n" >&2
+    if [ "$failed" -eq 0 ] && [ "$passed" -gt 0 ]; then
+        printf "  ${GREEN}  ✓ 所有 %d 个域名均可访问${NC}\n" "$passed" >&2
+        return 0
+    elif [ "$failed" -gt 0 ] && [ "$passed" -gt 0 ]; then
+        printf "  ${YELLOW}  ⚠  %d 个通过, %d 个失败 (部分不可达)${NC}\n" "$passed" "$failed" >&2
+        return 1
+    else
+        printf "  ${RED}  ✗ 所有域名均不可达 — 数据源 IP 已过期${NC}\n" >&2
+        return 2
+    fi
+}
 
 # ── Content validation ───────────────────────────────────────────────────────
 # Prevents malformed or malicious data from being written to /etc/hosts.
@@ -218,23 +327,52 @@ apply_hosts() {
 
 # ── Fetch from sources with fallback ──────────────────────────────────────────
 fetch_hosts_content() {
-    local content url
+    local content url filtered label
     while IFS= read -r url; do
         [ -z "$url" ] && continue
-        log_info "Fetching from $url"
+
+        case "$url" in
+            *jsdelivr*)     label="jsDelivr CDN" ;;
+            *hellogithub*)  label="raw.hellogithub.com" ;;
+            *github*)       label="GitHub Raw" ;;
+            *)              label="$url" ;;
+        esac
+
+        printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+        printf "  ${CYAN}  📡 正在获取数据源: %s${NC}\n" "$label" >&2
+        printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+
         content=$(curl -sfL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)
         if [ -z "$content" ]; then
-            log_warn "Failed to fetch from $url"
+            printf "  ${RED}  ✗ 数据源 %s 获取失败${NC}\n" "$label" >&2
             continue
         fi
+        printf "  ${GREEN}  ✓ 数据源 %s 获取成功${NC}\n" "$label" >&2
+
+        # Filter out dead core IPs (github.com, api.github.com, etc.)
+        if ! filtered=$(filter_dead_core_ips "$content" 2>&1); then
+            printf "  ${YELLOW}  ⚠ 核心域名 IP 全部不可用，尝试下一个数据源...${NC}\n" >&2
+            continue
+        fi
+        content="$filtered"
+
         if validate_hosts_content "$content"; then
+            # Show per-domain IP test results (output to stderr)
+            test_domain_ips "$content" >&2
+            local ip_rc=$?
+            if [ "$ip_rc" -eq 2 ]; then
+                printf "  ${YELLOW}  ⚠ 数据源 IP 不可达，尝试下一个数据源...${NC}\n" >&2
+                continue
+            fi
             echo "$content"
             return 0
         fi
-        log_warn "Content validation failed for $url"
+        printf "  ${RED}  ✗ 数据源 %s 格式验证失败${NC}\n" "$label" >&2
     done <<< "$SOURCES"
 
-    log_error "All sources exhausted — no valid hosts content obtained."
+    printf "\n  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    printf "  ${RED}  ✗ 所有数据源均不可用，请检查网络连接后重试${NC}\n" >&2
+    printf "  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
     return 1
 }
 
@@ -335,7 +473,6 @@ run_cycle() {
     local silent="${1:-false}"
     local raw_content block
     raw_content=$(fetch_hosts_content) || {
-        log_error "所有数据源均不可用，请检查网络连接后重试。"
         exit 1
     }
     block=$(build_hosts_block "$raw_content")
