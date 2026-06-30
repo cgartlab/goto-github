@@ -25,13 +25,12 @@ HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 MARKER_START="# >>> goto-github >>>"
 MARKER_END="# <<< goto-github <<<"
 
-SOURCES="
-  https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts
-  https://raw.hellogithub.com/hosts
-"
+SOURCES="https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts
+https://raw.hellogithub.com/hosts
+https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts"
 
 # Colors
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -73,6 +72,115 @@ cleanup() {
     exit 0
 }
 trap cleanup INT TERM
+
+# ── TCP reachability test ──────────────────────────────────────────────────────
+# Returns 0 if IP:port is reachable, 1 if not.
+test_tcp_reachable() {
+    local ip="$1"
+    local port="${2:-443}"
+    local timeout="${3:-3}"
+    if command -v nc >/dev/null 2>&1; then
+        nc -z -w "$timeout" "$ip" "$port" 2>/dev/null
+    else
+        # Fallback: use curl to test connection (exit code 0 = success, 22 = HTTP error = TCP worked)
+        local rc=0
+        curl -s --connect-timeout "$timeout" --max-time "$((timeout + 2))" \
+            -o /dev/null "https://${ip}:${port}/" 2>/dev/null || rc=$?
+        [ "$rc" -eq 0 ] || [ "$rc" -eq 22 ]
+    fi
+}
+
+# ── Filter dead core domain IPs from hosts content ────────────────────────────
+# Removes lines for core domains (github.com, api.github.com, etc.) whose IPs
+# are unreachable. CDN domains (avatars, raw, objects) are NOT checked.
+# Returns filtered content on stdout; returns 1 if ALL core IPs are dead.
+CORE_DOMAINS="github.com api.github.com gist.github.com codeload.github.com"
+
+filter_dead_core_ips() {
+    local content="$1"
+    local line ip domain
+    local dead_core_count=0
+    local total_core_count=0
+
+    while IFS= read -r line; do
+        # Skip empty lines and comments
+        [ -z "$line" ] && continue
+        [[ "$line" =~ ^# ]] && continue
+
+        # Extract IP and domain
+        ip=$(echo "$line" | awk '{print $1}')
+        domain=$(echo "$line" | awk '{print $2}')
+
+        # Check if this is a core domain
+        if echo "$CORE_DOMAINS" | grep -q "\b${domain}\b"; then
+            total_core_count=$((total_core_count + 1))
+            if ! test_tcp_reachable "$ip" "443" "3"; then
+                echo -e "${YELLOW}[WARN]${NC} Skipping $domain (unreachable IP: $ip)" >&2
+                dead_core_count=$((dead_core_count + 1))
+                continue
+            fi
+        fi
+
+        echo "$line"
+    done <<< "$content"
+
+    if [ "$total_core_count" -gt 0 ] && [ "$dead_core_count" -eq "$total_core_count" ]; then
+        echo -e "${YELLOW}[WARN]${NC} All core domain IPs are unreachable in this source" >&2
+        return 1
+    fi
+    return 0
+}
+
+# ── Verify domain IPs with live progress display ─────────────────────────────
+# Tests core GitHub domains against IPs from hosts content.
+# Returns: 0=all passed, 1=partial, 2=all failed
+# All output goes to stderr (stdout reserved for content return)
+test_domain_ips() {
+    local raw_content="$1"
+    local -a domains=("github.com" "api.github.com" "codeload.github.com")
+    local passed=0 failed=0 skipped=0
+
+    printf "\n" >&2
+    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    printf "  ${CYAN}  🔍 正在测试域名连通性...${NC}\n" >&2
+    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+
+    for domain in "${domains[@]}"; do
+        local ip http_code
+        ip=$(echo "$raw_content" | grep -m1 -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\s+${domain}\b" | awk '{print $1}')
+        if [ -z "$ip" ]; then
+            printf "  ${YELLOW}  −${NC}  %-24s (该源未包含此域名)\n" "$domain" >&2
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        printf "  ${CYAN}  ○${NC}  测试 %s → %s ... " "$domain" "$ip" >&2
+
+        http_code=$(curl -s --connect-timeout 5 --max-time 8 \
+            -o /dev/null -w "%{http_code}" \
+            "https://${domain}/" 2>/dev/null || echo "000")
+
+        if [ "$http_code" != "000" ] && [ -n "$http_code" ]; then
+            printf "\r  ${GREEN}  ✓${NC}  %-24s → %-16s (HTTP %s)\n" "$domain" "$ip" "$http_code" >&2
+            passed=$((passed + 1))
+        else
+            printf "\r  ${RED}  ✗${NC}  %-24s → %-16s ${RED}连接超时${NC}\n" "$domain" "$ip" >&2
+            failed=$((failed + 1))
+        fi
+    done
+
+    printf "\n" >&2
+    if [ "$failed" -eq 0 ] && [ "$passed" -gt 0 ]; then
+        printf "  ${GREEN}  ✓ 所有 %d 个域名均可访问${NC}\n" "$passed" >&2
+        return 0
+    elif [ "$failed" -gt 0 ] && [ "$passed" -gt 0 ]; then
+        printf "  ${YELLOW}  ⚠  %d 个通过, %d 个失败 (部分不可达)${NC}\n" "$passed" "$failed" >&2
+        return 1
+    else
+        printf "  ${RED}  ✗ 所有域名均不可达 — 数据源 IP 已过期${NC}\n" >&2
+        return 2
+    fi
+}
 
 # ── Content validation ───────────────────────────────────────────────────────
 # Prevents malformed or malicious data from being written to /etc/hosts.
@@ -121,20 +229,23 @@ flush_dns() {
 # ── PowerShell subcommand interface ──────────────────────────────────────────
 # Outputs machine-parseable JSON for --pwsh status
 json_status() {
-    local ip http_code reachable="false"
+    local ip_count="0" has_github="false" reachable="false" http_code=""
 
-    ip=$(grep -m1 "github.com" "$HOSTS_FILE" 2>/dev/null | awk '{print $1}')
-    if [ -z "$ip" ]; then
-        ip=""
-    else
-        http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
-            --resolve "github.com:443:$ip" \
-            -o /dev/null -w "%{http_code}" \
-            "https://github.com/" 2>/dev/null) || http_code=""
-        if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
-            http_code="000"
+    # 统计 hosts 块中的条目
+    local block_content
+    block_content=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null || true)
+    if [ -n "$block_content" ]; then
+        ip_count=$(echo "$block_content" | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+        if echo "$block_content" | grep -qE '\s+github\.com\b'; then
+            has_github="true"
         fi
-        [ "$http_code" = "200" ] && reachable="true"
+        # 直接测试 GitHub 连通性（通过 hosts 文件解析）
+        http_code=$(curl -s --connect-timeout 10 --max-time 20 \
+            -o /dev/null -w "%{http_code}" \
+            "https://github.com/" 2>/dev/null || true)
+        if echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+            reachable="true"
+        fi
     fi
 
     # Detect if block exists
@@ -146,9 +257,10 @@ json_status() {
     cat <<EOF
 {
   "installed": $block_exists,
-  "ip": "$ip",
+  "entries": $ip_count,
+  "has_github": $has_github,
   "reachable": $reachable,
-  "http_code": "$http_code"
+  "http_code": "${http_code:-}"
 }
 EOF
 }
@@ -173,32 +285,31 @@ remove_block() {
 
 # ── Show current status ───────────────────────────────────────────────────────
 show_status() {
-    local ip
-    ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
-        | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1 || true)
+    local block_exists ip_count has_github
+    block_exists=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null || true)
 
     echo ""
     echo "=== GoToGitHub Status ==="
     echo ""
 
-    if [ -z "$ip" ]; then
-        echo "  IP: (not installed)"
+    if [ -z "$block_exists" ]; then
+        echo "  Status: (not installed)"
         echo "  Run 'sudo ./fetch.sh' to install."
     else
-        echo "  IP:   $ip"
+        ip_count=$(echo "$block_exists" | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+        has_github=$(echo "$block_exists" | grep -cE '\s+github\.com\b' || true)
+        echo "  Entries: $ip_count"
+        echo "  github.com: $has_github entry(s)"
+
+        # Test actual connectivity through hosts file
         local http_code
-        http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
-            --resolve "github.com:443:$ip" \
+        http_code=$(curl -s --connect-timeout 10 --max-time 20 \
             -o /dev/null -w "%{http_code}" \
-            "https://github.com/" 2>/dev/null) || http_code=""
-        if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
-            http_code="000"
-        fi
-        if [ "$http_code" = "200" ]; then
-            echo -e "  Status: ${GREEN}OK${NC} — github.com reachable"
+            "https://github.com/" 2>/dev/null || true)
+        if echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+            echo -e "  Status: ${GREEN}OK${NC} — github.com reachable (HTTP $http_code)"
         else
-            echo -e "  Status: ${RED}FAILED${NC} (HTTP $http_code)"
+            echo -e "  Status: ${RED}FAILED${NC} — github.com unreachable"
         fi
     fi
     echo ""
@@ -216,54 +327,82 @@ apply_hosts() {
 
 # ── Fetch from sources with fallback ──────────────────────────────────────────
 fetch_hosts_content() {
-    local content url
+    local content url filtered label
     while IFS= read -r url; do
         [ -z "$url" ] && continue
-        log_info "Fetching from $url"
+
+        case "$url" in
+            *jsdelivr*)     label="jsDelivr CDN" ;;
+            *hellogithub*)  label="raw.hellogithub.com" ;;
+            *github*)       label="GitHub Raw" ;;
+            *)              label="$url" ;;
+        esac
+
+        printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+        printf "  ${CYAN}  📡 正在获取数据源: %s${NC}\n" "$label" >&2
+        printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+
         content=$(curl -sfL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)
         if [ -z "$content" ]; then
-            log_warn "Failed to fetch from $url"
+            printf "  ${RED}  ✗ 数据源 %s 获取失败${NC}\n" "$label" >&2
             continue
         fi
+        printf "  ${GREEN}  ✓ 数据源 %s 获取成功${NC}\n" "$label" >&2
+
+        # Filter out dead core IPs (github.com, api.github.com, etc.)
+        if ! filtered=$(filter_dead_core_ips "$content" 2>&1); then
+            printf "  ${YELLOW}  ⚠ 核心域名 IP 全部不可用，尝试下一个数据源...${NC}\n" >&2
+            continue
+        fi
+        content="$filtered"
+
         if validate_hosts_content "$content"; then
+            # Show per-domain IP test results (output to stderr)
+            test_domain_ips "$content" >&2
+            local ip_rc=$?
+            if [ "$ip_rc" -eq 2 ]; then
+                printf "  ${YELLOW}  ⚠ 数据源 IP 不可达，尝试下一个数据源...${NC}\n" >&2
+                continue
+            fi
             echo "$content"
             return 0
         fi
-        log_warn "Content validation failed for $url"
+        printf "  ${RED}  ✗ 数据源 %s 格式验证失败${NC}\n" "$label" >&2
     done <<< "$SOURCES"
 
-    log_error "All sources exhausted — no valid hosts content obtained."
+    printf "\n  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    printf "  ${RED}  ✗ 所有数据源均不可用，请检查网络连接后重试${NC}\n" >&2
+    printf "  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
     return 1
 }
 
 # ── Verify applied IP ───────────────────────────────────────────────────────────
 verify_hosts() {
-    local ip
-    ip=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
-        | grep -v "^${MARKER_START}" | grep -v "^${MARKER_END}" \
-        | grep -v '^#' | awk '{print $1}' | head -1 || true)
-    if [ -z "$ip" ]; then
-        log_warn "No IP found in hosts block"
+    # 验证 hosts 块已正确写入
+    local block_exists ip_count has_github
+    block_exists=$(sed -n "/^${MARKER_START}$/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null || true)
+    if [ -z "$block_exists" ]; then
+        log_warn "No goto-github block found in hosts file"
         return 1
     fi
-    log_info "Verifying IP $ip against github.com..."
-    local http_code
-    http_code=$(curl -sf --connect-timeout 3 --max-time 6 \
-        --resolve "github.com:443:$ip" \
-        -o /dev/null -w "%{http_code}" \
-        "https://github.com/" 2>/dev/null) || http_code=""
-    if ! echo "$http_code" | grep -qE '^[0-9]{3}$'; then
-        http_code="000"
-    fi
-    if [ "$http_code" = "200" ]; then
-        log_info "Verification PASSED — github.com reachable via $ip"
-        return 0
-    else
-        log_warn "Verification FAILED — github.com returned HTTP $http_code via $ip"
-        return 1
-    fi
-}
 
+    # 统计有效 IP 条目
+    ip_count=$(echo "$block_exists" | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+    # 检查 github.com 是否存在
+    has_github=$(echo "$block_exists" | grep -cE '\s+github\.com\b' || true)
+
+    if [ "$ip_count" -lt 10 ]; then
+        log_warn "Hosts block has only $ip_count entries (expected >= 10)"
+        return 1
+    fi
+    if [ "$has_github" -eq 0 ]; then
+        log_warn "Hosts block missing github.com entry"
+        return 1
+    fi
+
+    log_info "Hosts block verified: $ip_count entries, github.com entry present"
+    return 0
+}
 # ── Build hosts block from raw content ────────────────────────────────────────
 build_hosts_block() {
     local content="$1"
@@ -334,7 +473,6 @@ run_cycle() {
     local silent="${1:-false}"
     local raw_content block
     raw_content=$(fetch_hosts_content) || {
-        log_error "所有数据源均不可用，请检查网络连接后重试。"
         exit 1
     }
     block=$(build_hosts_block "$raw_content")
@@ -385,19 +523,21 @@ manual_select() {
     echo "  请选择:"
     echo "    1) jsDelivr CDN（主源）"
     echo "    2) raw.hellogithub.com（备用源）"
-    echo "    3) 删除已有条目（恢复原状）"
-    echo "    4) 返回主菜单"
+    echo "    3) GitHub Raw（直连源）"
+    echo "    4) 删除已有条目（恢复原状）"
+    echo "    5) 返回主菜单"
     echo ""
-    echo -n "  请输入 [1-4] (默认 4): "
+    echo -n "  请输入 [1-5] (默认 5): "
     local choice
     read -r choice
-    choice="${choice:-4}"
+    choice="${choice:-5}"
 
     local selected_source=""
     case "$choice" in
         1) selected_source="https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts" ;;
         2) selected_source="https://raw.hellogithub.com/hosts" ;;
-        3)
+        3) selected_source="https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts" ;;
+        4)
             if ! is_root; then
                 if is_mingw; then
                     log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
@@ -410,7 +550,7 @@ manual_select() {
             log_info "已删除 goto-github 条目"
             return 0
             ;;
-        4) show_menu; return 0 ;;
+        5) show_menu; return 0 ;;
         *) log_error "无效选项: $choice"; manual_select; return 0 ;;
     esac
 
@@ -559,7 +699,7 @@ main() {
                     ;;
                 source)
                     # Output current source selection
-                    echo '{"source":"jsdelivr","fallback":"hellogithub"}'
+                    echo '{"source":"jsdelivr","fallback":"hellogithub","tertiary":"github_raw"}'
                     ;;
                 *)
                     echo "{\"error\":\"unknown_subcommand\",\"message\":\"Usage: --pwsh auto|status|restore|source\"}" >&2
@@ -581,6 +721,7 @@ main() {
             echo "Data sources (mirror list with automatic fallback):"
             echo "  https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts"
             echo "  https://raw.hellogithub.com/hosts"
+            echo "  https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts"
             echo ""
             echo "Environment:"
             echo "  HOSTS_FILE  hosts file path (default: /etc/hosts)"
