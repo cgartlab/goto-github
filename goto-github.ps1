@@ -233,22 +233,6 @@ function Get-HostsContent {
     return $null
 }
 
-# ── Build Hosts Block ──────────────────────────────────────────────────────────
-function Build-HostsBlock {
-    param([string]$Content)
-
-    $lines = Get-ValidHostsLines -Content $Content
-    $block = @(
-        $script:MARKER_START
-        "# Managed by GoToGitHub — $(Get-Date -Format 'yyyy-MM-dd')"
-        "# Source: 521xueweihan/GitHub520"
-    ) + $lines + @(
-        $script:MARKER_END
-    )
-
-    return $block
-}
-
 # ── Verify Hosts ───────────────────────────────────────────────────────────────
 function Test-HostsVerification {
     # Get IP from block
@@ -352,9 +336,9 @@ function Start-RunCycle {
         return $false
     }
 
-    $block = Build-HostsBlock -Content $content
+    $lines = Get-ValidHostsLines -Content $content
     Remove-GotoBlock | Out-Null
-    Add-HostsBlock -Lines $block | Out-Null
+    Add-HostsBlock -Lines $lines | Out-Null
     Clear-DnsCache | Out-Null
 
     return $true
@@ -597,9 +581,9 @@ function Start-ManualSelect {
                 return
             }
 
-            $block = Build-HostsBlock -Content $content
+            $lines = Get-ValidHostsLines -Content $content
             Remove-GotoBlock | Out-Null
-            Add-HostsBlock -Lines $block | Out-Null
+            Add-HostsBlock -Lines $lines | Out-Null
             Clear-DnsCache | Out-Null
             if (Test-HostsVerification) {
                 Write-Host ""
@@ -725,9 +709,9 @@ switch ($arg) {
                     Write-Error '{"error":"fetch_failed","message":"All sources exhausted"}'
                     exit 1
                 }
-                $block = Build-HostsBlock -Content $content
+                $lines = Get-ValidHostsLines -Content $content
                 Remove-GotoBlock | Out-Null
-                Add-HostsBlock -Lines $block | Out-Null
+                Add-HostsBlock -Lines $lines | Out-Null
                 Clear-DnsCache | Out-Null
                 # Silently verify
                 Test-HostsVerification | Out-Null
