@@ -21,6 +21,22 @@ $script:SOURCES = @(
 $script:LAST_SOURCE_URL = $null
 $script:VERSION = 'v1.0.0'
 
+# Known-good candidate IP pools (verified reachable for direct access)
+$script:FASTLY_IPS = @(
+    '185.199.108.153', '185.199.109.153', '185.199.110.153', '185.199.111.153'
+)
+$script:AZURE_ASIA_IPS = @(
+    '140.82.112.21', '20.205.243.166', '20.205.243.165', '140.82.114.26'
+)
+# Key domains that must work for normal GitHub usage
+$script:KEY_DOMAINS = @(
+    'github.com', 'api.github.com', 'codeload.github.com',
+    'raw.githubusercontent.com', 'avatars.githubusercontent.com',
+    'objects.githubusercontent.com', 'media.githubusercontent.com',
+    'github.githubassets.com', 'live.github.com', 'education.github.com',
+    'pipelines.actions.githubusercontent.com', 'github.io', 'githubstatus.com'
+)
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 function Log-Info {
     param([string]$Message)
@@ -227,6 +243,75 @@ function Get-SourceLabel {
     return '521xueweihan/GitHub520'
 }
 
+# ── IP Verification & Auto-Repair ─────────────────────────────────────────────
+function Test-DomainReachable {
+    param([string]$Domain, [string]$Ip)
+
+    # Force connection to the specific IP via curl --resolve (skips hosts/DNS),
+    # which proves the IP actually serves the domain over HTTPS.
+    # Retry 3x because direct connections are intermittently reset; any success counts.
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $code = curl.exe -s --noproxy "*" --connect-timeout 5 --resolve "${Domain}:443:${Ip}" -o NUL -w "%{http_code}" "https://${Domain}" 2>$null
+        if ($code -match '^[2-4]\d\d$') {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Get-RepairPool {
+    param([string]$Domain)
+
+    if ($Domain -like '*githubusercontent*' -or $Domain -like 'github.io' -or $Domain -like 'githubstatus.com' -or $Domain -like '*githubassets*' -or $Domain -like '*fastly*') {
+        return $script:FASTLY_IPS
+    }
+    return $script:AZURE_ASIA_IPS
+}
+
+function Repair-HostsLines {
+    param([string[]]$Lines)
+
+    $repaired = @()
+    $outLines = @()
+
+    foreach ($line in $Lines) {
+        $outLines += $line
+        if ($line -notmatch '^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([\w.\-]+)$') {
+            continue
+        }
+        $ip = $Matches[1]
+        $domain = $Matches[2]
+        if ($script:KEY_DOMAINS -notcontains $domain) {
+            continue
+        }
+
+        if (Test-DomainReachable -Domain $domain -Ip $ip) {
+            continue
+        }
+
+        # Current IP unreachable — try candidate pool
+        $replacement = $null
+        foreach ($candidate in (Get-RepairPool -Domain $domain)) {
+            if ($candidate -eq $ip) { continue }
+            if (Test-DomainReachable -Domain $domain -Ip $candidate) {
+                $replacement = $candidate
+                break
+            }
+        }
+
+        if ($replacement) {
+            $newLine = $line -replace '^\S+', $replacement
+            $outLines[$outLines.Count - 1] = $newLine
+            $repaired += "${domain}: ${ip} -> ${replacement}"
+            Log-Warn "Repaired $domain ($ip unreachable, using $replacement)"
+        } else {
+            Log-Warn "Repair FAILED for $domain (no working IP found)"
+        }
+    }
+
+    return @{ Lines = $outLines; Repaired = $repaired }
+}
+
 # ── Apply Hosts (shared by RunCycle / ManualSelect / --pwsh auto) ──────────────
 function Invoke-ApplyHosts {
     param([string]$Content, [string]$SourceUrl = $script:LAST_SOURCE_URL)
@@ -240,6 +325,14 @@ function Invoke-ApplyHosts {
         Log-Error 'Failed to remove previous block; aborting apply'
         return $false
     }
+
+    # Verify key domains and replace unreachable IPs before writing
+    $repairResult = Repair-HostsLines -Lines $lines
+    $lines = $repairResult.Lines
+    if ($repairResult.Repaired.Count -gt 0) {
+        Log-Info "Auto-repaired $($repairResult.Repaired.Count) unreachable host(s)"
+    }
+
     $label = Get-SourceLabel -Url $SourceUrl
     if ([string]::IsNullOrWhiteSpace($label)) {
         $label = '521xueweihan/GitHub520'
@@ -291,8 +384,8 @@ function Test-HostsVerification {
         return $false
     }
 
-    # Extract first IP from block
-    $ipPattern = '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+.*github\.com'
+    # Extract the IP mapped to github.com exactly (not subdomains like alive.github.com)
+    $ipPattern = '(?m)^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+github\.com\s*$'
     if ($blockContent -match $ipPattern) {
         $ip = $Matches[1]
     } else {
@@ -302,32 +395,12 @@ function Test-HostsVerification {
 
     Log-Info "Verifying IP $ip against github.com..."
 
-    try {
-        # Test connectivity using System.Net.WebRequest with the specific IP
-        $request = [System.Net.WebRequest]::Create('https://github.com/')
-        $request.ServicePoint.BindIPEndPointDelegate = {
-            param($servicePoint, $remoteEndPoint, $retryCount)
-            return New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Parse($ip), 443)
-        }
-        $request.Timeout = 10000
-        $response = $request.GetResponse()
-        $statusCode = [int]$response.StatusCode
-        $response.Close()
-
-        if ($statusCode -eq 200) {
-            Log-Info "Verification PASSED — github.com reachable via $ip"
-            return $true
-        } else {
-            Log-Warn "Verification FAILED — github.com returned HTTP $statusCode via $ip"
-            return $false
-        }
-    } catch {
-        # Fallback: try basic ping or just return false
-        $statusCode = 0
-        if ($_.Exception.Response) {
-            $statusCode = [int]$_.Exception.Response.StatusCode
-        }
-        Log-Warn "Verification FAILED — github.com returned HTTP $statusCode via $ip"
+    # Test via curl --resolve (forces the specific IP, proves HTTPS serves the domain)
+    if (Test-DomainReachable -Domain 'github.com' -Ip $ip) {
+        Log-Info "Verification PASSED — github.com reachable via $ip"
+        return $true
+    } else {
+        Log-Warn "Verification FAILED — github.com not reachable via $ip"
         return $false
     }
 }
@@ -342,28 +415,19 @@ function Get-JSONStatus {
     if ($installed) {
         # Get IP from block
         $blockContent = Get-Content $script:HOSTS_FILE -Raw -ErrorAction SilentlyContinue
-        $ipPattern = '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+.*github\.com'
+        $ipPattern = '(?m)^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+github\.com\s*$'
         if ($blockContent -match $ipPattern) {
             $ip = $Matches[1]
         }
 
         if ($ip) {
-            # Test reachability
-            try {
-                $request = [System.Net.WebRequest]::Create('https://github.com/')
-                $request.ServicePoint.BindIPEndPointDelegate = {
-                    param($servicePoint, $remoteEndPoint, $retryCount)
-                    return New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Parse($ip), 443)
-                }
-                $request.Timeout = 6000
-                $response = $request.GetResponse()
-                $httpCode = [string][int]$response.StatusCode
-                $reachable = ($httpCode -eq '200')
-                $response.Close()
-            } catch {
-                if ($_.Exception.Response) {
-                    $httpCode = [string][int]$_.Exception.Response.StatusCode
-                }
+            # Test reachability via curl --resolve (forces the specific IP)
+            if (Test-DomainReachable -Domain 'github.com' -Ip $ip) {
+                $httpCode = '200'
+                $reachable = $true
+            } else {
+                $httpCode = '000'
+                $reachable = $false
             }
         }
     }
@@ -402,7 +466,7 @@ function Show-Status {
     }
 
     $blockContent = Get-Content $script:HOSTS_FILE -Raw -ErrorAction SilentlyContinue
-    $ipPattern = '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+.*github\.com'
+    $ipPattern = '(?m)^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+github\.com\s*$'
     if ($blockContent -match $ipPattern) {
         $ip = $Matches[1]
         Write-Host "  IP:   $ip" -ForegroundColor Green
