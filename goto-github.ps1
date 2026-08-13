@@ -18,6 +18,7 @@ $script:SOURCES = @(
     'https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts'
     'https://raw.hellogithub.com/hosts'
 )
+$script:LAST_SOURCE_URL = $null
 $script:VERSION = 'v1.0.0'
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -173,22 +174,13 @@ function Remove-GotoBlock {
 }
 
 function Add-HostsBlock {
-    param([string[]]$Lines)
-
-    # Backup first
-    $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
-    $backupPath = "$script:HOSTS_FILE.goto-github.bak.$timestamp"
-    try {
-        Copy-Item -Path $script:HOSTS_FILE -Destination $backupPath -ErrorAction Stop
-    } catch {
-        Log-Warn "Backup failed: $_"
-    }
+    param([string[]]$Lines, [string]$SourceLabel = '521xueweihan/GitHub520')
 
     $blockContent = @(
         ''
         $script:MARKER_START
         "# Managed by GoToGitHub — $(Get-Date -Format 'yyyy-MM-dd')"
-        "# Source: 521xueweihan/GitHub520"
+        "# Source: $SourceLabel"
     ) + $Lines + @(
         $script:MARKER_END
         ''
@@ -202,6 +194,62 @@ function Add-HostsBlock {
         Log-Error "Failed to write hosts file: $_"
         return $false
     }
+}
+
+# ── Backup ─────────────────────────────────────────────────────────────────────
+function Backup-HostsFile {
+    $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+    $backupPath = "$script:HOSTS_FILE.goto-github.bak.$timestamp"
+    try {
+        Copy-Item -Path $script:HOSTS_FILE -Destination $backupPath -ErrorAction Stop
+    } catch {
+        Log-Error "Backup failed: $_"
+        return $false
+    }
+    # Retain only the 3 most recent backups
+    Get-ChildItem "$script:HOSTS_FILE.goto-github.bak.*" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip 3 |
+        Remove-Item -ErrorAction SilentlyContinue
+    return $true
+}
+
+# ── Source Label ───────────────────────────────────────────────────────────────
+function Get-SourceLabel {
+    param([string]$Url)
+
+    if ($Url -like '*GitHub520*') {
+        return '521xueweihan/GitHub520'
+    }
+    if ($Url -like '*hellogithub*') {
+        return 'raw.hellogithub.com'
+    }
+    return '521xueweihan/GitHub520'
+}
+
+# ── Apply Hosts (shared by RunCycle / ManualSelect / --pwsh auto) ──────────────
+function Invoke-ApplyHosts {
+    param([string]$Content, [string]$SourceUrl = $script:LAST_SOURCE_URL)
+
+    $lines = Get-ValidHostsLines -Content $Content
+    if (-not (Backup-HostsFile)) {
+        Log-Error 'Failed to create backup; aborting apply'
+        return $false
+    }
+    if (-not (Remove-GotoBlock)) {
+        Log-Error 'Failed to remove previous block; aborting apply'
+        return $false
+    }
+    $label = Get-SourceLabel -Url $SourceUrl
+    if ([string]::IsNullOrWhiteSpace($label)) {
+        $label = '521xueweihan/GitHub520'
+    }
+    if (-not (Add-HostsBlock -Lines $lines -SourceLabel $label)) {
+        Log-Error 'Failed to write hosts block'
+        return $false
+    }
+    Clear-DnsCache | Out-Null
+    return $true
 }
 
 # ── Fetch Hosts Content ────────────────────────────────────────────────────────
@@ -221,6 +269,7 @@ function Get-HostsContent {
                 continue
             }
             if (Test-ValidHostsContent -Content $content) {
+                $script:LAST_SOURCE_URL = $url
                 return $content
             }
             Log-Warn "Content validation failed for $url"
@@ -231,22 +280,6 @@ function Get-HostsContent {
 
     Log-Error "All sources exhausted — no valid hosts content obtained."
     return $null
-}
-
-# ── Build Hosts Block ──────────────────────────────────────────────────────────
-function Build-HostsBlock {
-    param([string]$Content)
-
-    $lines = Get-ValidHostsLines -Content $Content
-    $block = @(
-        $script:MARKER_START
-        "# Managed by GoToGitHub — $(Get-Date -Format 'yyyy-MM-dd')"
-        "# Source: 521xueweihan/GitHub520"
-    ) + $lines + @(
-        $script:MARKER_END
-    )
-
-    return $block
 }
 
 # ── Verify Hosts ───────────────────────────────────────────────────────────────
@@ -352,12 +385,7 @@ function Start-RunCycle {
         return $false
     }
 
-    $block = Build-HostsBlock -Content $content
-    Remove-GotoBlock | Out-Null
-    Add-HostsBlock -Lines $block | Out-Null
-    Clear-DnsCache | Out-Null
-
-    return $true
+    return Invoke-ApplyHosts -Content $content
 }
 
 # ── Show Status (Human-readable) ───────────────────────────────────────────────
@@ -552,7 +580,12 @@ function Start-ManualSelect {
                 }
                 return
             }
-            Remove-GotoBlock | Out-Null
+            if (-not (Remove-GotoBlock)) {
+                Write-Host ""
+                Write-Host "  ❌ 删除失败：无法删除 goto-github 条目" -ForegroundColor Red
+                Write-Host ""
+                return
+            }
             Clear-DnsCache | Out-Null
             Write-Host ""
             Write-Host "  ✅ 已删除 goto-github 条目" -ForegroundColor Green
@@ -597,10 +630,12 @@ function Start-ManualSelect {
                 return
             }
 
-            $block = Build-HostsBlock -Content $content
-            Remove-GotoBlock | Out-Null
-            Add-HostsBlock -Lines $block | Out-Null
-            Clear-DnsCache | Out-Null
+            if (-not (Invoke-ApplyHosts -Content $content -SourceUrl $selectedSource)) {
+                Write-Host ""
+                Write-Host "  ❌ 应用失败，请检查 hosts 文件。" -ForegroundColor Red
+                Write-Host ""
+                return
+            }
             if (Test-HostsVerification) {
                 Write-Host ""
                 Write-Host "  ✅ GitHub 加速已成功应用！" -ForegroundColor Green
@@ -631,14 +666,21 @@ function Start-RestoreHosts {
     }
 
     if (Test-BlockExists) {
-        Remove-GotoBlock | Out-Null
+        if (-not (Remove-GotoBlock)) {
+            Write-Host ""
+            Write-Host "  ❌ 恢复失败：无法删除 goto-github 条目" -ForegroundColor Red
+            Write-Host ""
+            return $false
+        }
         Write-Host ""
         Write-Host "  ✅ 已恢复原始 hosts 文件" -ForegroundColor Green
         Write-Host ""
+        return $true
     } else {
         Write-Host ""
         Write-Host "  ℹ 未找到 goto-github 条目，无需恢复" -ForegroundColor Cyan
         Write-Host ""
+        return $true
     }
 }
 
@@ -704,7 +746,9 @@ switch ($arg) {
             Log-Error "This operation requires admin. Run as Administrator."
             exit 1
         }
-        Start-RestoreHosts
+        if (-not (Start-RestoreHosts)) {
+            exit 1
+        }
         Clear-DnsCache | Out-Null
         exit 0
     }
@@ -725,10 +769,10 @@ switch ($arg) {
                     Write-Error '{"error":"fetch_failed","message":"All sources exhausted"}'
                     exit 1
                 }
-                $block = Build-HostsBlock -Content $content
-                Remove-GotoBlock | Out-Null
-                Add-HostsBlock -Lines $block | Out-Null
-                Clear-DnsCache | Out-Null
+                if (-not (Invoke-ApplyHosts -Content $content)) {
+                    Write-Error '{"error":"apply_failed","message":"Failed to apply hosts block"}'
+                    exit 1
+                }
                 # Silently verify
                 Test-HostsVerification | Out-Null
                 Write-Output '{"success":true}'
@@ -743,7 +787,10 @@ switch ($arg) {
                     Write-Error '{"error":"need_root","message":"run as administrator"}'
                     exit 1
                 }
-                Remove-GotoBlock | Out-Null
+                if (-not (Remove-GotoBlock)) {
+                    Write-Error '{"error":"restore_failed","message":"Failed to restore hosts file"}'
+                    exit 1
+                }
                 Clear-DnsCache | Out-Null
                 Write-Output '{"restored":true}'
                 exit 0
