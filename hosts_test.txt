@@ -1,0 +1,9 @@
+127.0.0.1 localhost
+
+# >>> goto-github >>>
+# Managed by GoToGitHub — 2026-08-13
+# Source: raw.hellogithub.com
+140.82.114.3 github.com
+185.199.108.154 raw.githubusercontent.com
+# <<< goto-github <<<
+
