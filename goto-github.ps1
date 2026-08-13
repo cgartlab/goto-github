@@ -18,6 +18,7 @@ $script:SOURCES = @(
     'https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts'
     'https://raw.hellogithub.com/hosts'
 )
+$script:LAST_SOURCE_URL = $null
 $script:VERSION = 'v1.0.0'
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -173,7 +174,7 @@ function Remove-GotoBlock {
 }
 
 function Add-HostsBlock {
-    param([string[]]$Lines)
+    param([string[]]$Lines, [string]$SourceLabel = '521xueweihan/GitHub520')
 
     # Backup first
     $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
@@ -188,7 +189,7 @@ function Add-HostsBlock {
         ''
         $script:MARKER_START
         "# Managed by GoToGitHub — $(Get-Date -Format 'yyyy-MM-dd')"
-        "# Source: 521xueweihan/GitHub520"
+        "# Source: $SourceLabel"
     ) + $Lines + @(
         $script:MARKER_END
         ''
@@ -202,6 +203,29 @@ function Add-HostsBlock {
         Log-Error "Failed to write hosts file: $_"
         return $false
     }
+}
+
+# ── Source Label ───────────────────────────────────────────────────────────────
+function Get-SourceLabel {
+    param([string]$Url)
+
+    if ($Url -like '*GitHub520*') {
+        return '521xueweihan/GitHub520'
+    }
+    if ($Url -like '*hellogithub*') {
+        return 'raw.hellogithub.com'
+    }
+    return $Url
+}
+
+# ── Apply Hosts (shared by RunCycle / ManualSelect / --pwsh auto) ──────────────
+function Invoke-ApplyHosts {
+    param([string]$Content, [string]$SourceUrl = $script:LAST_SOURCE_URL)
+
+    $lines = Get-ValidHostsLines -Content $Content
+    Remove-GotoBlock | Out-Null
+    Add-HostsBlock -Lines $lines -SourceLabel (Get-SourceLabel -Url $SourceUrl) | Out-Null
+    Clear-DnsCache | Out-Null
 }
 
 # ── Fetch Hosts Content ────────────────────────────────────────────────────────
@@ -221,6 +245,7 @@ function Get-HostsContent {
                 continue
             }
             if (Test-ValidHostsContent -Content $content) {
+                $script:LAST_SOURCE_URL = $url
                 return $content
             }
             Log-Warn "Content validation failed for $url"
@@ -336,11 +361,7 @@ function Start-RunCycle {
         return $false
     }
 
-    $lines = Get-ValidHostsLines -Content $content
-    Remove-GotoBlock | Out-Null
-    Add-HostsBlock -Lines $lines | Out-Null
-    Clear-DnsCache | Out-Null
-
+    Invoke-ApplyHosts -Content $content
     return $true
 }
 
@@ -581,10 +602,7 @@ function Start-ManualSelect {
                 return
             }
 
-            $lines = Get-ValidHostsLines -Content $content
-            Remove-GotoBlock | Out-Null
-            Add-HostsBlock -Lines $lines | Out-Null
-            Clear-DnsCache | Out-Null
+            Invoke-ApplyHosts -Content $content -SourceUrl $selectedSource
             if (Test-HostsVerification) {
                 Write-Host ""
                 Write-Host "  ✅ GitHub 加速已成功应用！" -ForegroundColor Green
@@ -709,10 +727,7 @@ switch ($arg) {
                     Write-Error '{"error":"fetch_failed","message":"All sources exhausted"}'
                     exit 1
                 }
-                $lines = Get-ValidHostsLines -Content $content
-                Remove-GotoBlock | Out-Null
-                Add-HostsBlock -Lines $lines | Out-Null
-                Clear-DnsCache | Out-Null
+                Invoke-ApplyHosts -Content $content
                 # Silently verify
                 Test-HostsVerification | Out-Null
                 Write-Output '{"success":true}'
