@@ -182,7 +182,8 @@ function Add-HostsBlock {
     try {
         Copy-Item -Path $script:HOSTS_FILE -Destination $backupPath -ErrorAction Stop
     } catch {
-        Log-Warn "Backup failed: $_"
+        Log-Error "Backup failed: $_"
+        return $false
     }
 
     $blockContent = @(
@@ -223,9 +224,20 @@ function Invoke-ApplyHosts {
     param([string]$Content, [string]$SourceUrl = $script:LAST_SOURCE_URL)
 
     $lines = Get-ValidHostsLines -Content $Content
-    Remove-GotoBlock | Out-Null
-    Add-HostsBlock -Lines $lines -SourceLabel (Get-SourceLabel -Url $SourceUrl) | Out-Null
+    if (-not (Remove-GotoBlock)) {
+        Log-Error 'Failed to remove previous block; aborting apply'
+        return $false
+    }
+    $label = Get-SourceLabel -Url $SourceUrl
+    if ([string]::IsNullOrWhiteSpace($label)) {
+        $label = '521xueweihan/GitHub520'
+    }
+    if (-not (Add-HostsBlock -Lines $lines -SourceLabel $label)) {
+        Log-Error 'Failed to write hosts block'
+        return $false
+    }
     Clear-DnsCache | Out-Null
+    return $true
 }
 
 # ── Fetch Hosts Content ────────────────────────────────────────────────────────
@@ -361,8 +373,7 @@ function Start-RunCycle {
         return $false
     }
 
-    Invoke-ApplyHosts -Content $content
-    return $true
+    return Invoke-ApplyHosts -Content $content
 }
 
 # ── Show Status (Human-readable) ───────────────────────────────────────────────
@@ -602,7 +613,12 @@ function Start-ManualSelect {
                 return
             }
 
-            Invoke-ApplyHosts -Content $content -SourceUrl $selectedSource
+            if (-not (Invoke-ApplyHosts -Content $content -SourceUrl $selectedSource)) {
+                Write-Host ""
+                Write-Host "  ❌ 应用失败，请检查 hosts 文件。" -ForegroundColor Red
+                Write-Host ""
+                return
+            }
             if (Test-HostsVerification) {
                 Write-Host ""
                 Write-Host "  ✅ GitHub 加速已成功应用！" -ForegroundColor Green
@@ -727,7 +743,10 @@ switch ($arg) {
                     Write-Error '{"error":"fetch_failed","message":"All sources exhausted"}'
                     exit 1
                 }
-                Invoke-ApplyHosts -Content $content
+                if (-not (Invoke-ApplyHosts -Content $content)) {
+                    Write-Error '{"error":"apply_failed","message":"Failed to apply hosts block"}'
+                    exit 1
+                }
                 # Silently verify
                 Test-HostsVerification | Out-Null
                 Write-Output '{"success":true}'
