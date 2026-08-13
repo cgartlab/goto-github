@@ -176,16 +176,6 @@ function Remove-GotoBlock {
 function Add-HostsBlock {
     param([string[]]$Lines, [string]$SourceLabel = '521xueweihan/GitHub520')
 
-    # Backup first
-    $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
-    $backupPath = "$script:HOSTS_FILE.goto-github.bak.$timestamp"
-    try {
-        Copy-Item -Path $script:HOSTS_FILE -Destination $backupPath -ErrorAction Stop
-    } catch {
-        Log-Error "Backup failed: $_"
-        return $false
-    }
-
     $blockContent = @(
         ''
         $script:MARKER_START
@@ -206,6 +196,19 @@ function Add-HostsBlock {
     }
 }
 
+# ── Backup ─────────────────────────────────────────────────────────────────────
+function Backup-HostsFile {
+    $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+    $backupPath = "$script:HOSTS_FILE.goto-github.bak.$timestamp"
+    try {
+        Copy-Item -Path $script:HOSTS_FILE -Destination $backupPath -ErrorAction Stop
+        return $true
+    } catch {
+        Log-Error "Backup failed: $_"
+        return $false
+    }
+}
+
 # ── Source Label ───────────────────────────────────────────────────────────────
 function Get-SourceLabel {
     param([string]$Url)
@@ -216,7 +219,7 @@ function Get-SourceLabel {
     if ($Url -like '*hellogithub*') {
         return 'raw.hellogithub.com'
     }
-    return $Url
+    return '521xueweihan/GitHub520'
 }
 
 # ── Apply Hosts (shared by RunCycle / ManualSelect / --pwsh auto) ──────────────
@@ -224,6 +227,10 @@ function Invoke-ApplyHosts {
     param([string]$Content, [string]$SourceUrl = $script:LAST_SOURCE_URL)
 
     $lines = Get-ValidHostsLines -Content $Content
+    if (-not (Backup-HostsFile)) {
+        Log-Error 'Failed to create backup; aborting apply'
+        return $false
+    }
     if (-not (Remove-GotoBlock)) {
         Log-Error 'Failed to remove previous block; aborting apply'
         return $false
@@ -649,7 +656,12 @@ function Start-RestoreHosts {
     }
 
     if (Test-BlockExists) {
-        Remove-GotoBlock | Out-Null
+        if (-not (Remove-GotoBlock)) {
+            Write-Host ""
+            Write-Host "  ❌ 恢复失败：无法删除 goto-github 条目" -ForegroundColor Red
+            Write-Host ""
+            return
+        }
         Write-Host ""
         Write-Host "  ✅ 已恢复原始 hosts 文件" -ForegroundColor Green
         Write-Host ""
@@ -761,7 +773,10 @@ switch ($arg) {
                     Write-Error '{"error":"need_root","message":"run as administrator"}'
                     exit 1
                 }
-                Remove-GotoBlock | Out-Null
+                if (-not (Remove-GotoBlock)) {
+                    Write-Error '{"error":"restore_failed","message":"Failed to restore hosts file"}'
+                    exit 1
+                }
                 Clear-DnsCache | Out-Null
                 Write-Output '{"restored":true}'
                 exit 0
