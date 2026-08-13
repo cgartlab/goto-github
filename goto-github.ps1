@@ -202,11 +202,16 @@ function Backup-HostsFile {
     $backupPath = "$script:HOSTS_FILE.goto-github.bak.$timestamp"
     try {
         Copy-Item -Path $script:HOSTS_FILE -Destination $backupPath -ErrorAction Stop
-        return $true
     } catch {
         Log-Error "Backup failed: $_"
         return $false
     }
+    # Retain only the 3 most recent backups
+    Get-ChildItem "$script:HOSTS_FILE.goto-github.bak.*" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip 3 |
+        Remove-Item -ErrorAction SilentlyContinue
+    return $true
 }
 
 # ── Source Label ───────────────────────────────────────────────────────────────
@@ -575,7 +580,12 @@ function Start-ManualSelect {
                 }
                 return
             }
-            Remove-GotoBlock | Out-Null
+            if (-not (Remove-GotoBlock)) {
+                Write-Host ""
+                Write-Host "  ❌ 删除失败：无法删除 goto-github 条目" -ForegroundColor Red
+                Write-Host ""
+                return
+            }
             Clear-DnsCache | Out-Null
             Write-Host ""
             Write-Host "  ✅ 已删除 goto-github 条目" -ForegroundColor Green
@@ -660,15 +670,17 @@ function Start-RestoreHosts {
             Write-Host ""
             Write-Host "  ❌ 恢复失败：无法删除 goto-github 条目" -ForegroundColor Red
             Write-Host ""
-            return
+            return $false
         }
         Write-Host ""
         Write-Host "  ✅ 已恢复原始 hosts 文件" -ForegroundColor Green
         Write-Host ""
+        return $true
     } else {
         Write-Host ""
         Write-Host "  ℹ 未找到 goto-github 条目，无需恢复" -ForegroundColor Cyan
         Write-Host ""
+        return $true
     }
 }
 
@@ -734,7 +746,9 @@ switch ($arg) {
             Log-Error "This operation requires admin. Run as Administrator."
             exit 1
         }
-        Start-RestoreHosts
+        if (-not (Start-RestoreHosts)) {
+            exit 1
+        }
         Clear-DnsCache | Out-Null
         exit 0
     }
