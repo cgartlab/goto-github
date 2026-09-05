@@ -67,6 +67,8 @@ detect_platform_str() {
 }
 
 cleanup() {
+    # Remove any temp file left by an interrupted apply
+    [ -n "${TMP_FILE:-}" ] && rm -f "$TMP_FILE"
     echo ""
     echo "  感谢使用 GoToGitHub，再见！"
     exit 0
@@ -334,9 +336,14 @@ prune_backups() {
 
 apply_hosts() {
     local block="$1"
-    local tmp_file
-    # Backup current state (including any existing block) before modification
-    cp -p "$HOSTS_FILE" "${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
+    local tmp_file backup perms
+    # Backup current state (including any existing block) before modification.
+    # cp -p may fail on some filesystems (e.g. Git Bash / NTFS), fall back to cp.
+    backup="${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
+    if ! cp -p "$HOSTS_FILE" "$backup" 2>/dev/null && ! cp "$HOSTS_FILE" "$backup"; then
+        log_error "Backup failed; aborting apply"
+        exit 1
+    fi
     prune_backups
     # Atomically replace hosts: build full content in a temp file then rename,
     # so an interrupted apply can never leave a half-written hosts file.
@@ -344,14 +351,34 @@ apply_hosts() {
         log_error "Failed to create temp file; hosts unchanged"
         exit 1
     }
-    # Strip any previous goto-github block, preserving all other lines
-    sed "/^${MARKER_START}$/,/^${MARKER_END}$/d" "$HOSTS_FILE" > "$tmp_file"
+    TMP_FILE="$tmp_file"
+    # Strip any previous goto-github block, preserving all other lines.
+    # Pattern deliberately NOT $-anchored on the start marker (consistent with
+    # remove_block): manually edited marker lines may carry trailing whitespace
+    # or CR, and an anchored pattern would fail to match → duplicate blocks.
+    sed "/^${MARKER_START}/,/^${MARKER_END}$/d" "$HOSTS_FILE" > "$tmp_file"
     printf "\n%s\n" "$block" >> "$tmp_file"
-    # Keep standard hosts permissions/ownership (root:wheel on macOS /
-    # root:root on Linux — both gid 0, so chown 0:0 works everywhere).
-    chmod 644 "$tmp_file" 2>/dev/null || true
+    # Preserve original permissions instead of hardcoding 644 (a user may have
+    # customized them). macOS BSD stat uses -f %Lp, GNU/Linux uses -c %a.
+    if is_macos; then
+        perms=$(stat -f %Lp "$HOSTS_FILE" 2>/dev/null || true)
+    else
+        perms=$(stat -c %a "$HOSTS_FILE" 2>/dev/null || true)
+    fi
+    if [ -n "$perms" ]; then
+        chmod "$perms" "$tmp_file" 2>/dev/null || chmod 644 "$tmp_file" 2>/dev/null || true
+    else
+        chmod 644 "$tmp_file" 2>/dev/null || true
+    fi
+    # root:wheel (macOS) and root:root (Linux) both have gid 0.
     chown 0:0 "$tmp_file" 2>/dev/null || true
-    mv -f "$tmp_file" "$HOSTS_FILE"
+    if ! mv -f "$tmp_file" "$HOSTS_FILE"; then
+        rm -f "$tmp_file"
+        TMP_FILE=""
+        log_error "Failed to replace $HOSTS_FILE; hosts unchanged (backup kept: $backup)"
+        exit 1
+    fi
+    TMP_FILE=""
     log_info "Applied to $HOSTS_FILE"
 }
 
