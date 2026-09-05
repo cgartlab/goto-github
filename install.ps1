@@ -157,9 +157,14 @@ function Add-BomIfMissing {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
+    # Guard against empty/tiny files (bytes[0] would throw out of range)
+    $bom = [byte[]](239, 187, 191)
+    if ($bytes.Length -lt 3) {
+        [System.IO.File]::WriteAllBytes($Path, $bom + $bytes)
+        return
+    }
     # Check if first 3 bytes are UTF-8 BOM: EF BB BF (239, 187, 191)
     if ($bytes[0] -ne 239 -or $bytes[1] -ne 187 -or $bytes[2] -ne 191) {
-        $bom = [byte[]](239, 187, 191)
         $newBytes = $bom + $bytes
         [System.IO.File]::WriteAllBytes($Path, $newBytes)
     }
@@ -195,9 +200,18 @@ function Invoke-Download {
             # Validate the file was downloaded correctly
             if (Test-Path $Destination) {
                 $fileSize = (Get-Item $Destination).Length
-                if ($fileSize -gt 100) {  # Basic validation: file should have content
-                    Write-Success "Saved to $Destination (from: $url)"
-                    return $true
+                if ($fileSize -gt 100) {
+                    # Content sanity check: real files contain project markers.
+                    # A 404 HTML/JSON body can be >100 bytes, so size alone is
+                    # not enough to trust the download.
+                    $content = Get-Content $Destination -Raw -ErrorAction SilentlyContinue
+                    if ($content -and ($content -match 'goto-github|GoToGitHub')) {
+                        Write-Success "Saved to $Destination (from: $url)"
+                        return $true
+                    } else {
+                        Write-Warn "Downloaded content looks invalid, trying next mirror..."
+                        Remove-Item $Destination -Force -ErrorAction SilentlyContinue
+                    }
                 } else {
                     Write-Warn "Downloaded file too small ($fileSize bytes), trying next mirror..."
                     Remove-Item $Destination -Force -ErrorAction SilentlyContinue

@@ -1,1 +1,6 @@
 * text=auto
+# Shell scripts must stay LF: CRLF breaks bash execution under Git Bash/MSYS
+*.sh text eol=lf
+# PowerShell scripts use CRLF on Windows
+*.ps1 text eol=crlf
+Makefile text eol=lf

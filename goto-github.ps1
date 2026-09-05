@@ -162,7 +162,15 @@ function Remove-GotoBlock {
         return $true
     }
 
-    $lines = Get-Content $script:HOSTS_FILE -ErrorAction SilentlyContinue
+    try {
+        # .NET methods: read/write as UTF-8 (no BOM) preserving non-ASCII lines.
+        # Get-Content/Set-Content in PS 5.1 default to ANSI and would corrupt
+        # UTF-8 comments in hosts when rewriting the whole file.
+        $lines = [System.IO.File]::ReadAllLines($script:HOSTS_FILE)
+    } catch {
+        Log-Error "Failed to read hosts file: $_"
+        return $false
+    }
     $inBlock = $false
     $newLines = @()
 
@@ -181,7 +189,7 @@ function Remove-GotoBlock {
     }
 
     try {
-        Set-Content -Path $script:HOSTS_FILE -Value ($newLines -join "`n") -ErrorAction Stop
+        [System.IO.File]::WriteAllLines($script:HOSTS_FILE, $newLines)
         return $true
     } catch {
         Log-Error "Failed to remove block: $_"
@@ -475,29 +483,13 @@ function Show-Status {
         return
     }
 
-    # Test reachability
-    try {
-        $request = [System.Net.WebRequest]::Create('https://github.com/')
-        $request.ServicePoint.BindIPEndPointDelegate = {
-            param($servicePoint, $remoteEndPoint, $retryCount)
-            return New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Parse($ip), 443)
-        }
-        $request.Timeout = 6000
-        $response = $request.GetResponse()
-        $httpCode = [int]$response.StatusCode
-        $response.Close()
-
-        if ($httpCode -eq 200) {
-            Write-Host "  Status: OK — github.com reachable" -ForegroundColor Green
-        } else {
-            Write-Host "  Status: FAILED (HTTP $httpCode)" -ForegroundColor Red
-        }
-    } catch {
-        $httpCode = 0
-        if ($_.Exception.Response) {
-            $httpCode = [int]$_.Exception.Response.StatusCode
-        }
-        Write-Host "  Status: FAILED (HTTP $httpCode)" -ForegroundColor Red
+    # Test reachability — same method as JSON status (curl --resolve forces the
+    # specific IP). BindIPEndPointDelegate binds the LOCAL source endpoint, not
+    # the target, so it cannot prove the mapped IP serves github.com.
+    if (Test-DomainReachable -Domain 'github.com' -Ip $ip) {
+        Write-Host "  Status: OK — github.com reachable" -ForegroundColor Green
+    } else {
+        Write-Host "  Status: FAILED (unreachable)" -ForegroundColor Red
     }
 
     Write-Host ""
