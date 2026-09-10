@@ -13,7 +13,10 @@ PROBE_POOL_CAP=300
 PROBE_TEST_CAP=50
 PROBE_TIMEOUT=8
 PROBE_TARGET="https://github.com/github/gitignore.git/info/refs?service=git-upload-pack"
-export MARKER_START MARKER_END PROBE_RADIUS PROBE_POOL_CAP PROBE_TEST_CAP PROBE_TIMEOUT PROBE_TARGET HOSTS_FILE
+# Sources are irrelevant to the assertions (mock curl ignores the URL except
+# for the probe target), but probe_github_ip reads $SOURCES under set -u.
+SOURCES="https://example.invalid/a https://example.invalid/b"
+export MARKER_START MARKER_END PROBE_RADIUS PROBE_POOL_CAP PROBE_TEST_CAP PROBE_TIMEOUT PROBE_TARGET HOSTS_FILE SOURCES
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 FETCH_SH="$(cd "$HERE/.." && pwd)/fetch.sh"
@@ -105,14 +108,18 @@ rm -f "$tmp" "$tmp2" "$tmp3" "$tmp4" "$tmp5" "$tmp6"
 # ── probe_one_ip: mock curl, assert pass/fail classification ──────────────────
 printf '\nprobe_one_ip\n'
 
-# Mock curl: emit HTTP_CODE as the %{http_code} -w payload.
+# Mock curl: probe target returns HTTP_CODE, source URLs return hosts content.
 curl() {
-    local a
+    local a url=""
     for a in "$@"; do
         case "$a" in
-            *'%{http_code}'*) printf '%s' "$HTTP_CODE" ;;
+            http*) url="$a" ;;
         esac
     done
+    case "$url" in
+        *gitignore*) printf '%s' "${HTTP_CODE:-200}" ;;
+        *) printf '%s' "${MOCK_SOURCE_CONTENT:-}" ;;
+    esac
 }
 
 HTTP_CODE=200; probe_one_ip "1.2.3.4" > /tmp/probe_out
@@ -123,6 +130,29 @@ assert_eq "" "$(cat /tmp/probe_out)" "HTTP 400 → IP rejected"
 
 HTTP_CODE=000; probe_one_ip "1.2.3.4" > /tmp/probe_out
 assert_eq "" "$(cat /tmp/probe_out)" "HTTP 000 (unreachable) → IP rejected"
+
+rm -f /tmp/probe_out
+
+# ── probe_github_ip: pool building + fail paths ───────────────────────────────
+printf '\nprobe_github_ip\n'
+
+MOCK_SOURCE_CONTENT=$'140.82.113.20\tgithub.com\n20.205.243.166\tapi.github.com'
+HTTP_CODE=200
+probe_github_ip > /tmp/probe_out 2>/dev/null && r=0 || r=1
+assert_eq "0" "$r" "reachable candidate → probe succeeds"
+assert_eq "github.com" "$(cut -f2 /tmp/probe_out)" "output is a hosts line for github.com"
+cut -f1 /tmp/probe_out | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' && r=0 || r=1
+assert_eq "0" "$r" "returned value is a dotted-quad IP"
+
+HTTP_CODE=000
+probe_github_ip > /tmp/probe_out 2>/dev/null && r=0 || r=1
+assert_eq "1" "$r" "every candidate unreachable → probe fails"
+assert_eq "" "$(cat /tmp/probe_out)" "failure produces no output"
+
+MOCK_SOURCE_CONTENT=""
+HTTP_CODE=200
+probe_github_ip > /tmp/probe_out 2>/dev/null && r=0 || r=1
+assert_eq "1" "$r" "empty sources → no candidates → probe fails"
 
 rm -f /tmp/probe_out
 
