@@ -163,6 +163,7 @@ test_domain_ips() {
 
         http_code=$(curl -s --connect-timeout 5 --max-time 8 \
             -o /dev/null -w "%{http_code}" \
+            --resolve "${domain}:443:${ip}" \
             "https://${domain}/" 2>/dev/null || echo "000")
 
         if [ "$http_code" != "000" ] && [ -n "$http_code" ]; then
@@ -506,6 +507,14 @@ interactive_menu() {
             manual_select
             ;;
         3)
+            if ! is_root; then
+                if is_mingw; then
+                    log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
+                    exit 1
+                fi
+                need_root "$0" --__restore
+                return
+            fi
             restore_hosts
             flush_dns
             echo ""
@@ -706,6 +715,11 @@ main() {
                 flush_dns
                 verify_hosts || true
             fi
+            ;;
+        --__restore)
+            # Internal: restore mode (after sudo re-exec from interactive menu)
+            restore_hosts
+            flush_dns
             ;;
         --status)
             show_status
