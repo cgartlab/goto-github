@@ -1,0 +1,52 @@
+name: PR Automation
+
+# Auto-labels, assigns, and adds PRs to the PC Automatic project board.
+# Reference: argus/.github/workflows/pr-automation.yml
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  automate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Auto-label by branch name
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          LABEL=""
+          case "$BRANCH" in
+            feat/*|feature/*)    LABEL="enhancement"      ;;
+            fix/*|bugfix/*)      LABEL="bug"              ;;
+            docs/*)              LABEL="documentation"    ;;
+            chore/*|perf/*)      LABEL="enhancement"      ;;
+            refactor/*|style/*)  LABEL="enhancement"      ;;
+          esac
+          if [ -n "$LABEL" ]; then
+            echo "[pr-automation] Adding label: $LABEL"
+            gh pr edit "${{ github.event.pull_request.number }}" --add-label "$LABEL" || true
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-assign PR author
+        # Skip Dependabot PRs: App installation tokens cannot assign bot accounts.
+        if: github.actor != 'dependabot[bot]'
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" \
+            --add-assignee "${{ github.actor }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add to PC Automatic project
+        uses: actions/add-to-project@v2
+        continue-on-error: true
+        with:
+          project-url: https://github.com/users/cgartlab/projects/2
+          github-token: ${{ secrets.PROJECT_TOKEN }}
