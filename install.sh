@@ -75,6 +75,7 @@ do_install() {
 
     if [ "$downloaded" = false ]; then
         log_error "All mirror sources failed. Please check your network connection."
+        rm -f "${SCRIPT_PATH}.tmp"
         echo ""
         echo "  Alternative: Download manually from GitHub:"
         echo "    mkdir -p ${INSTALL_DIR}"
@@ -126,6 +127,10 @@ do_uninstall() {
 
     echo ""
     log_info "✅ GoToGitHub has been uninstalled."
+    echo ""
+    log_warn "提示: 卸载不会移除 /etc/hosts 中的 goto-github 条目。"
+    log_warn "如需清理，请先重新安装后运行: sudo goto-github --restore"
+    echo ""
 }
 
 # ── Version ──────────────────────────────────────────────────────────────────
@@ -170,6 +175,7 @@ do_update() {
 
     if [ "$downloaded" = false ]; then
         log_error "All mirror sources failed. Update aborted."
+        rm -f "${SCRIPT_PATH}.tmp"
         exit 1
     fi
 

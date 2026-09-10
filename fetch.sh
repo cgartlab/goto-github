@@ -67,6 +67,8 @@ detect_platform_str() {
 }
 
 cleanup() {
+    # Remove any temp file left by an interrupted apply
+    [ -n "${TMP_FILE:-}" ] && rm -f "$TMP_FILE"
     echo ""
     echo "  感谢使用 GoToGitHub，再见！"
     exit 0
@@ -110,6 +112,9 @@ filter_dead_core_ips() {
         # Extract IP and domain
         ip=$(echo "$line" | awk '{print $1}')
         domain=$(echo "$line" | awk '{print $2}')
+        if [ -z "$ip" ] || [ -z "$domain" ]; then
+            continue
+        fi
 
         # Check if this is a core domain
         if echo "$CORE_DOMAINS" | grep -q "\b${domain}\b"; then
@@ -316,12 +321,64 @@ show_status() {
 }
 
 # ── Apply hosts block ──────────────────────────────────────────────────────────
+# Backup rotation: keep at most KEEP_BACKUPS recent backups to avoid clutter
+KEEP_BACKUPS="${KEEP_BACKUPS:-5}"
+
+prune_backups() {
+    local bak
+    # SC2012: intentional — ls -1t sorts by mtime to keep newest N backups.
+    # find -printf is not portable to macOS BSD find.
+    # shellcheck disable=SC2012
+    while IFS= read -r bak; do
+        rm -f "$bak"
+    done < <(ls -1t "${HOSTS_FILE}.goto-github.bak."* 2>/dev/null | tail -n +"$((KEEP_BACKUPS + 1))")
+}
+
 apply_hosts() {
     local block="$1"
-    remove_block
-    # Backup before modification
-    cp "$HOSTS_FILE" "${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
-    printf "\n%s\n" "$block" >> "$HOSTS_FILE"
+    local tmp_file backup perms
+    # Backup current state (including any existing block) before modification.
+    # cp -p may fail on some filesystems (e.g. Git Bash / NTFS), fall back to cp.
+    backup="${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
+    if ! cp -p "$HOSTS_FILE" "$backup" 2>/dev/null && ! cp "$HOSTS_FILE" "$backup"; then
+        log_error "Backup failed; aborting apply"
+        exit 1
+    fi
+    prune_backups
+    # Atomically replace hosts: build full content in a temp file then rename,
+    # so an interrupted apply can never leave a half-written hosts file.
+    tmp_file=$(mktemp "${HOSTS_FILE}.XXXXXXXX") || {
+        log_error "Failed to create temp file; hosts unchanged"
+        exit 1
+    }
+    TMP_FILE="$tmp_file"
+    # Strip any previous goto-github block, preserving all other lines.
+    # Pattern deliberately NOT $-anchored on the start marker (consistent with
+    # remove_block): manually edited marker lines may carry trailing whitespace
+    # or CR, and an anchored pattern would fail to match → duplicate blocks.
+    sed "/^${MARKER_START}/,/^${MARKER_END}$/d" "$HOSTS_FILE" > "$tmp_file"
+    printf "\n%s\n" "$block" >> "$tmp_file"
+    # Preserve original permissions instead of hardcoding 644 (a user may have
+    # customized them). macOS BSD stat uses -f %Lp, GNU/Linux uses -c %a.
+    if is_macos; then
+        perms=$(stat -f %Lp "$HOSTS_FILE" 2>/dev/null || true)
+    else
+        perms=$(stat -c %a "$HOSTS_FILE" 2>/dev/null || true)
+    fi
+    if [ -n "$perms" ]; then
+        chmod "$perms" "$tmp_file" 2>/dev/null || chmod 644 "$tmp_file" 2>/dev/null || true
+    else
+        chmod 644 "$tmp_file" 2>/dev/null || true
+    fi
+    # root:wheel (macOS) and root:root (Linux) both have gid 0.
+    chown 0:0 "$tmp_file" 2>/dev/null || true
+    if ! mv -f "$tmp_file" "$HOSTS_FILE"; then
+        rm -f "$tmp_file"
+        TMP_FILE=""
+        log_error "Failed to replace $HOSTS_FILE; hosts unchanged (backup kept: $backup)"
+        exit 1
+    fi
+    TMP_FILE=""
     log_info "Applied to $HOSTS_FILE"
 }
 
@@ -350,7 +407,9 @@ fetch_hosts_content() {
         printf "  ${GREEN}  ✓ 数据源 %s 获取成功${NC}\n" "$label" >&2
 
         # Filter out dead core IPs (github.com, api.github.com, etc.)
-        if ! filtered=$(filter_dead_core_ips "$content" 2>&1); then
+        # NOTE: no 2>&1 here — WARN messages must reach the terminal, only
+        # filtered content is captured on stdout.
+        if ! filtered=$(filter_dead_core_ips "$content"); then
             printf "  ${YELLOW}  ⚠ 核心域名 IP 全部不可用，尝试下一个数据源...${NC}\n" >&2
             continue
         fi
@@ -601,7 +660,7 @@ one_click_accelerate() {
             echo ""
         else
             log_info "正在请求 sudo..."
-            need_root "$0" --__cycle
+            need_root "$0" --__cycle true
         fi
         return
     fi
@@ -624,7 +683,8 @@ main() {
     case "${1:-}" in
         --__cycle)
             # Internal: run_cycle mode (after sudo re-exec)
-            run_cycle false
+            # $2 optional: "true" = silent mode (suppress verify warnings)
+            run_cycle "${2:-false}"
             ;;
         --__manual)
             # Internal: manual mode with pre-selected source (after sudo re-exec)
