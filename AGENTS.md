@@ -35,6 +35,7 @@ goto-github/
 |------|------|---------|
 | `sudo ./fetch.sh` | 拉取 → 验证 → 写入 hosts → DNS刷新 | ✅ |
 | `./fetch.sh --status` | 显示当前 IP 和连通性 | ❌ |
+| `./fetch.sh --probe` | 探测可用的 github.com IP（诊断用，不写 hosts） | ❌ |
 | `sudo ./fetch.sh --restore` | 移除 goto-github 条目 | ✅ |
 | `./fetch.sh --help` | 显示帮助 | ❌ |
 
@@ -58,7 +59,7 @@ goto-github/
 
 - **主分支**: `main`（稳定）；`dev-*` 分支开发
 - **提交**: Conventional Commits（`feat:` `fix:` `docs:` `refactor:` `chore:`）
-- **Lint**: `shellcheck fetch.sh install.sh`（0 warnings 方可提交）
+- **Lint**: `make lint`（shellcheck fetch.sh install.sh tests/，0 warnings）；`make test`（单元测试，mock curl 无需网络）
 - **PR**: 始终指向 `main`，禁止直推
 
 ## ANTI-PATTERNS
@@ -74,6 +75,9 @@ goto-github/
   - Unix: Bash 3.2+、curl、管理员权限
   - Windows: PowerShell 5.1+（原生，无需 Git Bash）
 - 无 Python 依赖
+- 单元测试：`tests/test_functions.sh`（mock curl，无需网络）
+- 探测兜底：所有源核心 IP 不可达时，从源 IP 扩展 ±7 的 /24 候选池并发探测，目标为 git smart-http 端点而非 github.com 首页（部分边缘 IP 返回首页但不通 git 流量）
+- 遮蔽检测：标记之前存在其他工具写入的 github.com 条目时警告（不修改标记区块外部）
 - Hosts 标记：`# >>> goto-github >>>` / `# <<< goto-github <<<`
 - 数据源：jsDelivr CDN GitHub520（主）→ raw.hellogithub.com（备）
 - 平台：macOS · Linux · Git Bash (Windows) · Windows PowerShell

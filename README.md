@@ -42,6 +42,7 @@ irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 -Out
 ```bash
 sudo ./fetch.sh              # 拉取 → 写入 hosts → 刷新 DNS
 ./fetch.sh --status         # 查看当前状态（无需 sudo）
+./fetch.sh --probe          # 探测可用 IP（诊断用，无需 sudo）
 sudo ./fetch.sh --restore   # 移除 goto-github 条目
 ```
 
@@ -61,6 +62,7 @@ sudo ./fetch.sh --restore   # 移除 goto-github 条目
 2. **验证** — 检查 IP 条目数量（≥10）和 github.com 域名存在性
 3. **写入** — 在 `/etc/hosts` 中以标记区块隔离写入，不影响其他条目
 4. **刷新** — macOS / Linux 刷新本地 DNS 缓存
+5. **探测** — 当所有源的核心 IP 均不可达时，自动探测可用的 GitHub 边缘 IP（见下节）
 
 ## 数据源
 
@@ -68,6 +70,18 @@ sudo ./fetch.sh --restore   # 移除 goto-github 条目
 |----|------|
 | `cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts` | 主源（CDN 加速） |
 | `raw.hellogithub.com/hosts` | 备用源（回退使用） |
+
+## IP 探测（兜底）
+
+GitHub 按 IP 精确干扰时，社区源列出的 IP 可能恰好被阻断。此时 fetch.sh 不会直接报错，而是主动探测：
+
+- **候选池** — 数据源中出现的唯一 IP，各扩展 ±7 的 /24 窗口（上限 300），去重后取前 50 个
+- **探测目标** — `github/gitignore` 的 git smart-http 端点，而非 `github.com` 首页。部分边缘 IP 能返回首页但不通 git 流量，只测首页会选出“假阳性”IP
+- **并发测试** — 返回首个 HTTP 2xx 的 IP，写入 hosts 启用探测模式
+
+单独诊断：`./fetch.sh --probe`（只探测不写 hosts）。
+
+⚠️ 探测到的 IP 同样是动态的，后续可能失效。另外，如果 `/etc/hosts` 在 goto-github 标记**之前**存在其他工具写入的 github.com 条目，它会优先生效并遮蔽本工具的映射 —— fetch.sh 会在应用后警告此情况，需手动处理。
 
 ## 环境变量
 
