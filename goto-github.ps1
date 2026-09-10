@@ -628,6 +628,13 @@ function Start-ManualSelect {
             $selectedSource = 'https://raw.hellogithub.com/hosts'
         }
         '3' {
+            $confirm = Read-Host "  确认删除所有 goto-github hosts 条目？(Y/N, 默认 N)"
+            if ($confirm -ne 'Y' -and $confirm -ne 'y') {
+                Write-Host ""
+                Write-Host "  已取消。"
+                Write-Host ""
+                return
+            }
             if (-not (Test-IsAdmin)) {
                 $result = Request-Admin
                 if (-not $result) {

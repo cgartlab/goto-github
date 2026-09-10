@@ -86,9 +86,11 @@ test_tcp_reachable() {
     else
         # Fallback: use curl to test connection (exit code 0 = success, 22 = HTTP error = TCP worked)
         local rc=0
-        curl -s --connect-timeout "$timeout" --max-time "$((timeout + 2))" \
+        curl -s --insecure --connect-timeout "$timeout" --max-time "$((timeout + 2))" \
             -o /dev/null "https://${ip}:${port}/" 2>/dev/null || rc=$?
-        [ "$rc" -eq 0 ] || [ "$rc" -eq 22 ]
+        # 0 = success, 22 = HTTP error (TCP worked), 35 = TLS connect error (TCP worked),
+        # 60 = cert mismatch (expected when connecting by IP — TCP still works)
+        [ "$rc" -eq 0 ] || [ "$rc" -eq 22 ] || [ "$rc" -eq 35 ] || [ "$rc" -eq 60 ]
     fi
 }
 
@@ -117,7 +119,7 @@ filter_dead_core_ips() {
         fi
 
         # Check if this is a core domain
-        if echo "$CORE_DOMAINS" | grep -q "\b${domain}\b"; then
+        if echo "$CORE_DOMAINS" | grep -qw "$domain"; then
             total_core_count=$((total_core_count + 1))
             if ! test_tcp_reachable "$ip" "443" "3"; then
                 echo -e "${YELLOW}[WARN]${NC} Skipping $domain (unreachable IP: $ip)" >&2
@@ -606,6 +608,16 @@ manual_select() {
         2) selected_source="https://raw.hellogithub.com/hosts" ;;
         3) selected_source="https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts" ;;
         4)
+            echo ""
+            echo "  ⚠ 确认删除所有 goto-github hosts 条目？(Y/N, 默认 N)"
+            echo -n "  请输入 [Y/N]: "
+            local confirm
+            read -r confirm
+            confirm="${confirm:-N}"
+            if [ "$confirm" != "Y" ] && [ "$confirm" != "y" ]; then
+                echo "  已取消。"
+                return 0
+            fi
             if ! is_root; then
                 if is_mingw; then
                     log_error "需要管理员权限。请以管理员身份运行 Git Bash。"
