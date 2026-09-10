@@ -62,7 +62,7 @@ detect_platform_str() {
     elif is_mingw; then
         echo "Windows Git Bash"
     else
-        echo "$(uname)"
+        uname
     fi
 }
 
@@ -147,10 +147,10 @@ test_domain_ips() {
     local -a domains=("github.com" "api.github.com" "codeload.github.com")
     local passed=0 failed=0 skipped=0
 
-    printf "\n" >&2
-    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
-    printf "  ${CYAN}  🔍 正在测试域名连通性...${NC}\n" >&2
-    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    echo -e "" >&2
+    echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo -e "  ${CYAN}  🔍 正在测试域名连通性...${NC}" >&2
+    echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
 
     for domain in "${domains[@]}"; do
         local ip http_code
@@ -177,7 +177,7 @@ test_domain_ips() {
         fi
     done
 
-    printf "\n" >&2
+    echo -e "" >&2
     if [ "$failed" -eq 0 ] && [ "$passed" -gt 0 ]; then
         printf "  ${GREEN}  ✓ 所有 %d 个域名均可访问${NC}\n" "$passed" >&2
         return 0
@@ -185,7 +185,7 @@ test_domain_ips() {
         printf "  ${YELLOW}  ⚠  %d 个通过, %d 个失败 (部分不可达)${NC}\n" "$passed" "$failed" >&2
         return 1
     else
-        printf "  ${RED}  ✗ 所有域名均不可达 — 数据源 IP 已过期${NC}\n" >&2
+        echo -e "  ${RED}  ✗ 所有域名均不可达 — 数据源 IP 已过期${NC}" >&2
         return 2
     fi
 }
@@ -398,9 +398,9 @@ fetch_hosts_content() {
             *)              label="$url" ;;
         esac
 
-        printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+        echo -e "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
         printf "  ${CYAN}  📡 正在获取数据源: %s${NC}\n" "$label" >&2
-        printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+        echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
 
         content=$(curl -sfL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)
         if [ -z "$content" ]; then
@@ -413,7 +413,7 @@ fetch_hosts_content() {
         # NOTE: no 2>&1 here — WARN messages must reach the terminal, only
         # filtered content is captured on stdout.
         if ! filtered=$(filter_dead_core_ips "$content"); then
-            printf "  ${YELLOW}  ⚠ 核心域名 IP 全部不可用，尝试下一个数据源...${NC}\n" >&2
+            echo -e "  ${YELLOW}  ⚠ 核心域名 IP 全部不可用，尝试下一个数据源...${NC}" >&2
             continue
         fi
         content="$filtered"
@@ -423,7 +423,7 @@ fetch_hosts_content() {
             test_domain_ips "$content" >&2
             local ip_rc=$?
             if [ "$ip_rc" -eq 2 ]; then
-                printf "  ${YELLOW}  ⚠ 数据源 IP 不可达，尝试下一个数据源...${NC}\n" >&2
+                echo -e "  ${YELLOW}  ⚠ 数据源 IP 不可达，尝试下一个数据源...${NC}" >&2
                 continue
             fi
             echo "$content"
@@ -432,9 +432,9 @@ fetch_hosts_content() {
         printf "  ${RED}  ✗ 数据源 %s 格式验证失败${NC}\n" "$label" >&2
     done <<< "$SOURCES"
 
-    printf "\n  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
-    printf "  ${RED}  ✗ 所有数据源均不可用，请检查网络连接后重试${NC}\n" >&2
-    printf "  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n" >&2
+    echo -e "\n  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo -e "  ${RED}  ✗ 所有数据源均不可用，请检查网络连接后重试${NC}" >&2
+    echo -e "  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
     return 1
 }
 
