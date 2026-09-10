@@ -14,7 +14,12 @@ $t=$env:TEMP+'\goto-github-install.ps1'
 try {
     Invoke-WebRequest -Uri $primaryUrl -OutFile $t -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
 } catch {
-    Invoke-WebRequest -Uri $fallbackUrl -OutFile $t -TimeoutSec 30 -UseBasicParsing
+    try {
+        Invoke-WebRequest -Uri $fallbackUrl -OutFile $t -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
+    } catch {
+        Write-Error "Failed to download install.ps1 from all sources: $($_.Exception.Message)"
+        exit 1
+    }
 }
 
 # Add UTF-8 BOM so Windows PS 5.1 reads as UTF-8 (not GB2312)

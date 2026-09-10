@@ -17,6 +17,7 @@ $script:MARKER_END = '# <<< goto-github <<<'
 $script:SOURCES = @(
     'https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts'
     'https://raw.hellogithub.com/hosts'
+    'https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts'
 )
 $script:LAST_SOURCE_URL = $null
 $script:VERSION = 'v1.0.0'
@@ -211,7 +212,7 @@ function Add-HostsBlock {
     )
 
     try {
-        Add-Content -Path $script:HOSTS_FILE -Value ($blockContent -join "`n") -ErrorAction Stop
+        Add-Content -Path $script:HOSTS_FILE -Value $blockContent -Encoding ASCII -ErrorAction Stop
         Log-Info "Applied to $script:HOSTS_FILE"
         return $true
     } catch {
@@ -627,6 +628,13 @@ function Start-ManualSelect {
             $selectedSource = 'https://raw.hellogithub.com/hosts'
         }
         '3' {
+            $confirm = Read-Host "  确认删除所有 goto-github hosts 条目？(Y/N, 默认 N)"
+            if ($confirm -ne 'Y' -and $confirm -ne 'y') {
+                Write-Host ""
+                Write-Host "  已取消。"
+                Write-Host ""
+                return
+            }
             if (-not (Test-IsAdmin)) {
                 $result = Request-Admin
                 if (-not $result) {
@@ -852,7 +860,7 @@ switch ($arg) {
                 exit 0
             }
             'source' {
-                Write-Output '{"source":"jsdelivr","fallback":"hellogithub"}'
+                Write-Output '{"source":"jsdelivr","fallback":"hellogithub","tertiary":"github_raw"}'
                 exit 0
             }
             default {
