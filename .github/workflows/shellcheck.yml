@@ -7,11 +7,13 @@ on:
     paths:
       - 'fetch.sh'
       - 'install.sh'
+      - 'tests/**'
   pull_request:
     branches: [main]
     paths:
       - 'fetch.sh'
       - 'install.sh'
+      - 'tests/**'
 
 permissions:
   contents: read
@@ -35,3 +37,6 @@ jobs:
           severity: warning
           name: install_sh
           additional_files: install.sh
+
+      - name: Run unit tests
+        run: bash tests/test_functions.sh

@@ -94,6 +94,17 @@ test_tcp_reachable() {
     fi
 }
 
+# curl reports 000 when there is no response at all (connection failed, timeout,
+# or DNS failure). Real HTTP status codes are 1xx-5xx, so requiring a leading
+# 1-5 keeps 000 from being miscounted as "reachable" — a hosts entry can point
+# at a dead IP and still print OK otherwise.
+is_http_code_ok() {
+    case "$1" in
+        [1-5][0-9][0-9]) return 0 ;;
+    esac
+    return 1
+}
+
 # ── Filter dead core domain IPs from hosts content ────────────────────────────
 # Removes lines for core domains (github.com, api.github.com, etc.) whose IPs
 # are unreachable. CDN domains (avatars, raw, objects) are NOT checked.
@@ -136,6 +147,99 @@ filter_dead_core_ips() {
         return 1
     fi
     return 0
+}
+
+# ── Last-resort IP probe ─────────────────────────────────────────────────────
+# GitHub rotates edge IPs and blocking is per-IP, so a source can list an
+# unreachable github.com while a neighbour in the same /24 still answers.
+# Pool = unique IPs the sources still serve, each expanded to a ±PROBE_RADIUS
+# window per /24. Probed in parallel via --resolve (SNI still routes the
+# request to github.com, so the IP must actually serve that Host).
+# The probe target is a real git smart-http endpoint, NOT the github.com front
+# page: some edge IPs serve the front page but time out on git traffic, which
+# would pass a front-page probe and then fail every git operation.
+# github/gitignore is GitHub's own evergreen public repo (probe target).
+PROBE_RADIUS=7
+PROBE_POOL_CAP=300
+PROBE_TEST_CAP=50
+PROBE_TIMEOUT=8
+PROBE_TARGET="https://github.com/github/gitignore.git/info/refs?service=git-upload-pack"
+
+probe_one_ip() {
+    local cand="$1" rc
+    rc=$(curl -s -o /dev/null --connect-timeout 4 --max-time "$PROBE_TIMEOUT" \
+        -w "%{http_code}" -H "Accept: application/x-git-upload-pack-advertisement" \
+        "$PROBE_TARGET" \
+        --resolve "github.com:443:${cand}" 2>/dev/null || true)
+    case "$rc" in
+        2*) printf '%s\n' "$cand" ;;
+    esac
+}
+
+probe_github_ip() {
+    local url line ip base octet cand winner
+    local -a pool=()
+    local -a dedup=()
+    local seen="" result_file content
+
+    result_file=$(mktemp "${TMPDIR:-/tmp}/goto-github-probe.XXXXXX") || return 1
+
+    while IFS= read -r url; do
+        [ -z "$url" ] && continue
+        content=$(curl -sfL --connect-timeout 8 --max-time 20 "$url" 2>/dev/null || true)
+        [ -z "$content" ] && continue
+        while IFS= read -r line; do
+            ip=$(echo "$line" | awk '{print $1}')
+            [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            base="${ip%.*}"
+            octet="${ip##*.}"
+            for ((cand=octet-PROBE_RADIUS; cand<=octet+PROBE_RADIUS; cand++)); do
+                if [ "$cand" -ge 1 ] && [ "$cand" -le 254 ] && [ "${#pool[@]}" -lt "$PROBE_POOL_CAP" ]; then
+                    pool+=("${base}.$cand")
+                fi
+            done
+        done <<< "$content"
+    done <<< "$SOURCES"
+
+    for ip in "${pool[@]}"; do
+        if [[ " $seen " != *" $ip "* ]]; then
+            seen="${seen:+ }$ip"
+            dedup+=("$ip")
+            [ "${#dedup[@]}" -ge "$PROBE_TEST_CAP" ] && break
+        fi
+    done
+
+    if [ "${#dedup[@]}" -eq 0 ]; then
+        rm -f "$result_file"
+        return 1
+    fi
+
+    for cand in "${dedup[@]}"; do
+        probe_one_ip "$cand" >> "$result_file" &
+    done
+    wait
+
+    if [ -s "$result_file" ]; then
+        winner=$(head -1 "$result_file")
+        rm -f "$result_file"
+        printf '%s\t%s\n' "$winner" "github.com"
+        return 0
+    fi
+    rm -f "$result_file"
+    return 1
+}
+
+# ── Hosts shadowing check ────────────────────────────────────────────────────
+# /etc/hosts resolves the first match, so a github.com entry written by another
+# tool ABOVE our marker makes our whole block inert. We never edit outside the
+# marker, so this reports the condition instead of fixing it.
+check_shadowing() {
+    local marker_line
+    marker_line=$(grep -nF "$MARKER_START" "$HOSTS_FILE" 2>/dev/null | head -1 | cut -d: -f1)
+    [ -z "$marker_line" ] && return 1
+    [ "$marker_line" -le 1 ] && return 1
+    sed -n "1,$((marker_line - 1))p" "$HOSTS_FILE" \
+        | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+[[:space:]]+github\.com([[:space:]]|$)'
 }
 
 # ── Verify domain IPs with live progress display ─────────────────────────────
@@ -251,7 +355,7 @@ json_status() {
         http_code=$(curl -s --connect-timeout 10 --max-time 20 \
             -o /dev/null -w "%{http_code}" \
             "https://github.com/" 2>/dev/null || true)
-        if echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+        if is_http_code_ok "$http_code"; then
             reachable="true"
         fi
     fi
@@ -314,7 +418,7 @@ show_status() {
         http_code=$(curl -s --connect-timeout 10 --max-time 20 \
             -o /dev/null -w "%{http_code}" \
             "https://github.com/" 2>/dev/null || true)
-        if echo "$http_code" | grep -qE '^[0-9]{3}$'; then
+        if is_http_code_ok "$http_code"; then
             echo -e "  Status: ${GREEN}OK${NC} — github.com reachable (HTTP $http_code)"
         else
             echo -e "  Status: ${RED}FAILED${NC} — github.com unreachable"
@@ -432,8 +536,15 @@ fetch_hosts_content() {
         printf "  ${RED}  ✗ 数据源 %s 格式验证失败${NC}\n" "$label" >&2
     done <<< "$SOURCES"
 
+    echo -e "  ${YELLOW}  🔎 所有数据源 IP 不可达，尝试主动探测可用 IP...${NC}" >&2
+    if content=$(probe_github_ip); then
+        echo -e "  ${GREEN}  ✓ 探测到可用 IP，启用探测模式${NC}" >&2
+        echo "$content"
+        return 0
+    fi
+
     echo -e "\n  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
-    echo -e "  ${RED}  ✗ 所有数据源均不可用，请检查网络连接后重试${NC}" >&2
+    echo -e "  ${RED}  ✗ 所有数据源均不可用，且探测未找到可用 IP${NC}" >&2
     echo -e "  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
     return 1
 }
@@ -548,6 +659,10 @@ run_cycle() {
     block=$(build_hosts_block "$raw_content")
     apply_hosts "$block"
     flush_dns
+    if check_shadowing; then
+        log_warn "检测到 $HOSTS_FILE 在 goto-github 标记之前已有 github.com 条目（其他工具写入），"
+        log_warn "它会优先生效并遮蔽我们的映射。请手动删除或更新该条目。"
+    fi
     echo ""
     if verify_hosts; then
         echo "========================================"
@@ -732,6 +847,10 @@ main() {
             # Internal: restore mode (after sudo re-exec from interactive menu)
             restore_hosts
             flush_dns
+            ;;
+        --probe)
+            # Diagnostic: probe for a working github.com IP without touching hosts.
+            probe_github_ip || { log_error "未找到可用的 github.com IP"; exit 1; }
             ;;
         --status)
             show_status
