@@ -24,6 +24,7 @@ set -euo pipefail
 HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 MARKER_START="# >>> goto-github >>>"
 MARKER_END="# <<< goto-github <<<"
+CURL_RETRY_OPTS=(--retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60)
 
 SOURCES="https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts
 https://raw.hellogithub.com/hosts
@@ -268,6 +269,7 @@ test_domain_ips() {
         printf "  ${CYAN}  ○${NC}  测试 %s → %s ... " "$domain" "$ip" >&2
 
         http_code=$(curl -s --connect-timeout 5 --max-time 8 \
+            "${CURL_RETRY_OPTS[@]}" \
             -o /dev/null -w "%{http_code}" \
             --resolve "${domain}:443:${ip}" \
             "https://${domain}/" 2>/dev/null || echo "000")
@@ -353,6 +355,7 @@ json_status() {
         fi
         # 直接测试 GitHub 连通性（通过 hosts 文件解析）
         http_code=$(curl -s --connect-timeout 10 --max-time 20 \
+            "${CURL_RETRY_OPTS[@]}" \
             -o /dev/null -w "%{http_code}" \
             "https://github.com/" 2>/dev/null || true)
         if is_http_code_ok "$http_code"; then
@@ -416,6 +419,7 @@ show_status() {
         # Test actual connectivity through hosts file
         local http_code
         http_code=$(curl -s --connect-timeout 10 --max-time 20 \
+            "${CURL_RETRY_OPTS[@]}" \
             -o /dev/null -w "%{http_code}" \
             "https://github.com/" 2>/dev/null || true)
         if is_http_code_ok "$http_code"; then
@@ -506,7 +510,7 @@ fetch_hosts_content() {
         printf "  ${CYAN}  📡 正在获取数据源: %s${NC}\n" "$label" >&2
         echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
 
-        content=$(curl -sfL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)
+        content=$(curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)
         if [ -z "$content" ]; then
             printf "  ${RED}  ✗ 数据源 %s 获取失败${NC}\n" "$label" >&2
             continue
@@ -761,7 +765,7 @@ manual_select() {
 
         log_info "使用数据源: $selected_source"
         local raw_content block
-        raw_content=$(curl -sfL --connect-timeout 10 --max-time 30 "$selected_source" 2>/dev/null) || {
+        raw_content=$(curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "$selected_source" 2>/dev/null) || {
             log_error "从该源获取数据失败，请检查网络后重试。"
             echo ""
             echo "  按 Enter 返回菜单..."
@@ -829,7 +833,7 @@ main() {
                 log_info "已删除 goto-github 条目"
             elif [ -n "${2:-}" ]; then
                 local raw_content block
-                raw_content=$(curl -sfL --connect-timeout 10 --max-time 30 "$2" 2>/dev/null) || {
+                raw_content=$(curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "$2" 2>/dev/null) || {
                     log_error "从该源获取数据失败"
                     exit 1
                 }
