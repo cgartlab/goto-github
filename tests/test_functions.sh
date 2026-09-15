@@ -39,6 +39,7 @@ extract() {
 
 eval "$(extract check_shadowing)"
 eval "$(extract is_http_code_ok)"
+eval "$(extract describe_curl_error)"
 eval "$(extract probe_one_ip)"
 eval "$(extract probe_github_ip)"
 
@@ -61,6 +62,16 @@ for code in 0 00 099 12 1234 abc; do
     is_http_code_ok "$code" && r=0 || r=1
     assert_eq "1" "$r" "'$code' → NOT reachable (malformed)"
 done
+
+# ── describe_curl_error: failures must stay specific ──────────────────────────
+printf '\ndescribe_curl_error\n'
+
+assert_eq "connection failed" "$(describe_curl_error 7 '')" "curl 7 → connection failure"
+assert_eq "unable to resolve host" "$(describe_curl_error 6 '')" "curl 6 → DNS failure"
+assert_eq "request timeout" "$(describe_curl_error 28 '')" "curl 28 → timeout"
+assert_eq "HTTP error response" "$(describe_curl_error 22 '')" "curl 22 → HTTP error"
+assert_eq "exit 99" "$(describe_curl_error 99 '')" "unknown curl code → exit code"
+assert_eq "connection failed, stderr: Could not resolve host" "$(describe_curl_error 7 'Could not resolve host')" "curl stderr is preserved"
 
 # ── check_shadowing ─────────────────────────────────────────────────────────
 printf '\ncheck_shadowing\n'
