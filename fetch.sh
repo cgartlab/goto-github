@@ -489,9 +489,31 @@ apply_hosts() {
     log_info "Applied to $HOSTS_FILE"
 }
 
+# Map common curl failures to short, actionable diagnostics.
+describe_curl_error() {
+    local rc="$1" stderr="$2"
+
+    case "$rc" in
+        3) printf 'redirect loop' ;;
+        5) printf 'unable to resolve proxy host' ;;
+        6) printf 'unable to resolve host' ;;
+        7) printf 'connection failed' ;;
+        22) printf 'HTTP error response' ;;
+        28) printf 'request timeout' ;;
+        35) printf 'TLS connection error' ;;
+        60) printf 'SSL certificate problem' ;;
+        0) printf 'empty response' ;;
+        *) printf 'exit %s' "$rc" ;;
+    esac
+
+    if [ -n "$stderr" ]; then
+        printf ', stderr: %s' "$stderr"
+    fi
+}
+
 # ── Fetch from sources with fallback ──────────────────────────────────────────
 fetch_hosts_content() {
-    local content url filtered label
+    local content url filtered label curl_error_tmp curl_rc source_error
     while IFS= read -r url; do
         [ -z "$url" ] && continue
 
@@ -506,11 +528,15 @@ fetch_hosts_content() {
         printf "  ${CYAN}  📡 正在获取数据源: %s${NC}\n" "$label" >&2
         echo -e "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
 
-        content=$(curl -sfL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null || true)
-        if [ -z "$content" ]; then
-            printf "  ${RED}  ✗ 数据源 %s 获取失败${NC}\n" "$label" >&2
+        curl_error_tmp=$(mktemp)
+        content=$(curl -sfL --connect-timeout 10 --max-time 30 "$url" 2>"$curl_error_tmp") && curl_rc=0 || curl_rc=$?
+        if [ "$curl_rc" -ne 0 ] || [ -z "$content" ]; then
+            source_error=$(describe_curl_error "$curl_rc" "$(tr -d '\r' < "$curl_error_tmp" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')")
+            printf "  ${RED}  ✗ 数据源 %s 获取失败 (%s)${NC}\n" "$label" "$source_error" >&2
+            rm -f "$curl_error_tmp"
             continue
         fi
+        rm -f "$curl_error_tmp"
         printf "  ${GREEN}  ✓ 数据源 %s 获取成功${NC}\n" "$label" >&2
 
         # Filter out dead core IPs (github.com, api.github.com, etc.)
