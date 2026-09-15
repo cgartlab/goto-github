@@ -13,7 +13,9 @@ PROBE_POOL_CAP=300
 PROBE_TEST_CAP=50
 PROBE_TIMEOUT=8
 PROBE_TARGET="https://github.com/github/gitignore.git/info/refs?service=git-upload-pack"
+CURL_RETRY_OPTS=(--retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60)
 export MARKER_START MARKER_END PROBE_RADIUS PROBE_POOL_CAP PROBE_TEST_CAP PROBE_TIMEOUT PROBE_TARGET HOSTS_FILE
+export CURL_RETRY_OPTS
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 FETCH_SH="$(cd "$HERE/.." && pwd)/fetch.sh"
@@ -56,6 +58,8 @@ assert_eq "1" "$r" "HTTP 000 → NOT reachable (curl no-response)"
 
 is_http_code_ok "" && r=0 || r=1
 assert_eq "1" "$r" "empty → NOT reachable"
+
+assert_eq "--retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60" "${CURL_RETRY_OPTS[*]}" "download retry options are configured"
 
 for code in 0 00 099 12 1234 abc; do
     is_http_code_ok "$code" && r=0 || r=1
