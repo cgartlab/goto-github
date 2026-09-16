@@ -177,7 +177,7 @@ probe_one_ip() {
 }
 
 probe_github_ip() {
-    local url line ip base octet cand winner
+    local url line ip base octet cand winner round1
     local -a pool=()
     local -a dedup=()
     local seen="" result_file content
@@ -201,6 +201,13 @@ probe_github_ip() {
         done <<< "$content"
     done <<< "$SOURCES"
 
+    # Empty-array expansion under set -u aborts on bash 3.2 (macOS default), so
+    # bail before iterating: this is exactly the "every source is dead" case.
+    if [ "${#pool[@]}" -eq 0 ]; then
+        rm -f "$result_file"
+        return 1
+    fi
+
     for ip in "${pool[@]}"; do
         if [[ " $seen " != *" $ip "* ]]; then
             seen="${seen:+ }$ip"
@@ -214,19 +221,38 @@ probe_github_ip() {
         return 1
     fi
 
+    # Round 1: which candidates answer at all.
     for cand in "${dedup[@]}"; do
         probe_one_ip "$cand" >> "$result_file" &
     done
     wait
 
+    if [ ! -s "$result_file" ]; then
+        rm -f "$result_file"
+        return 1
+    fi
+
+    # Round 2: edge IPs flake — a candidate can answer 200 then time out on the
+    # next request (observed in the field: same IP going 200→000→200 over a few
+    # minutes). Re-test the survivors so the IP committed to hosts is the most
+    # stable one. If every survivor flakes, fall back to round 1: a flaky IP
+    # still beats no IP at all.
+    round1=$(sort -u "$result_file")
+    : > "$result_file"
+    while IFS= read -r cand; do
+        [ -z "$cand" ] && continue
+        probe_one_ip "$cand" >> "$result_file" &
+    done <<< "$round1"
+    wait
+
     if [ -s "$result_file" ]; then
         winner=$(head -1 "$result_file")
-        rm -f "$result_file"
-        printf '%s\t%s\n' "$winner" "github.com"
-        return 0
+    else
+        winner=$(head -1 <<< "$round1")
     fi
     rm -f "$result_file"
-    return 1
+    printf '%s\t%s\n' "$winner" "github.com"
+    return 0
 }
 
 # ── Hosts shadowing check ────────────────────────────────────────────────────
