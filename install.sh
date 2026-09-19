@@ -33,6 +33,7 @@ INSTALL_DIR="${HOME}/.local/share/goto-github"
 BIN_DIR="${HOME}/.local/bin"
 SYMLINK="${BIN_DIR}/goto-github"
 SCRIPT_PATH="${INSTALL_DIR}/fetch.sh"
+CURL_RETRY_OPTS=(--retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60)
 VERSION_FILE="${INSTALL_DIR}/VERSION"
 
 # Colors
@@ -57,7 +58,7 @@ do_install() {
     local downloaded=false
     for mirror in "${MIRRORS[@]}"; do
         log_info "  Attempting: $mirror"
-        if curl -sfL --connect-timeout 10 --max-time 30 "${mirror}" -o "${SCRIPT_PATH}.tmp" 2>/dev/null; then
+        if curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "${mirror}" -o "${SCRIPT_PATH}.tmp" 2>/dev/null; then
             # Validate the downloaded file
             if bash -n "${SCRIPT_PATH}.tmp" 2>/dev/null; then
                 mv "${SCRIPT_PATH}.tmp" "${SCRIPT_PATH}"
@@ -158,7 +159,7 @@ do_update() {
     local downloaded=false
     for mirror in "${MIRRORS[@]}"; do
         log_info "  Attempting: $mirror"
-        if curl -sfL --connect-timeout 10 --max-time 30 "${mirror}" -o "${SCRIPT_PATH}.tmp" 2>/dev/null; then
+        if curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "${mirror}" -o "${SCRIPT_PATH}.tmp" 2>/dev/null; then
             if bash -n "${SCRIPT_PATH}.tmp" 2>/dev/null; then
                 mv "${SCRIPT_PATH}.tmp" "${SCRIPT_PATH}"
                 log_info "  ✓ Successfully updated from: $mirror"
