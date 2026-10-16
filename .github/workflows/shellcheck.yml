@@ -7,12 +7,14 @@ on:
     paths:
       - 'fetch.sh'
       - 'install.sh'
+      - '*.ps1'
       - 'tests/**'
   pull_request:
     branches: [main]
     paths:
       - 'fetch.sh'
       - 'install.sh'
+      - '*.ps1'
       - 'tests/**'
 
 permissions:
@@ -40,3 +42,32 @@ jobs:
 
       - name: Run unit tests
         run: bash tests/test_functions.sh
+
+  pwsh-lint:
+    name: PowerShell lint (PSScriptAnalyzer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run PSScriptAnalyzer on *.ps1
+        shell: pwsh
+        run: |
+          # runner 预装 PSScriptAnalyzer；缺失才安装
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          # 逐文件分析：-Path 对数组绑定的行为随版本不稳，单文件传最稳
+          $all = @()
+          foreach ($f in (Get-ChildItem -Recurse -Filter *.ps1)) {
+            $v = Invoke-ScriptAnalyzer -Path $f.FullName `
+              -Severity @('Error', 'Warning') `
+              -ExcludeRule @('PSAvoidUsingWriteHost', 'PSAvoidUsingPlainTextForPassword', 'PSUseDeclaredVarsMoreThanAssignments', 'PSReviewUnusedParameter', 'PSUseShouldProcessForStateChangingFunctions', 'PSUseApprovedVerbs', 'PSUseSingularNouns', 'PSUseBOMForUnicodeEncodedFile') 2>$null
+            if ($v) { $all += $v }
+          }
+          # 门槛：Error 级才阻断；Warning（命名/BOM 等风格）仅展示，避免强制重写既有脚本
+          if ($all) {
+            $all | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize
+            $errs = @($all | Where-Object { $_.Severity -eq 'Error' })
+            if ($errs.Count -gt 0) { exit 1 }
+          }
+          Write-Host "PSScriptAnalyzer passed (no errors; style warnings informational)"

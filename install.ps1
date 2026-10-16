@@ -178,7 +178,8 @@ function Invoke-Download {
     param(
         [string]$FileName,
         [string[]]$Mirrors,
-        [string]$Destination
+        [string]$Destination,
+        [string]$ExpectedSha256 = $null
     )
 
     Write-Step "Downloading $FileName..."
@@ -206,6 +207,18 @@ function Invoke-Download {
                     # not enough to trust the download.
                     $content = Get-Content $Destination -Raw -ErrorAction SilentlyContinue
                     if ($content -and ($content -match 'goto-github|GoToGitHub')) {
+                        # 校验 SHA256（issue #29）：与发布版 SHA256SUMS 比对，
+                        # 防止镜像投毒 / 下载损坏。预期哈希缺失时降级警告。
+                        if ($ExpectedSha256) {
+                            $hash = (Get-FileHash -Algorithm SHA256 -Path $Destination).Hash
+                            if ($hash -ne $ExpectedSha256.ToUpper()) {
+                                Write-Warn "Checksum mismatch (expected $ExpectedSha256, got $hash), trying next mirror..."
+                                Remove-Item $Destination -Force -ErrorAction SilentlyContinue
+                                continue
+                            }
+                        } else {
+                            Write-Warn "No expected SHA256 available (SHA256SUMS 不可用)，跳过校验"
+                        }
                         Write-Success "Saved to $Destination (from: $url)"
                         return $true
                     } else {
@@ -258,6 +271,21 @@ function Show-Instructions {
     Write-Host ""
 }
 
+function Get-ExpectedSha256 {
+    <#
+    .SYNOPSIS
+        从下载的 SHA256SUMS 中读取某文件的预期 SHA256（issue #29）。
+    #>
+    param([string]$FileName)
+    $sumsPath = Join-Path $env:TEMP "goto-github-SHA256SUMS"
+    if (Test-Path $sumsPath) {
+        $escaped = [regex]::Escape($FileName)
+        $line = Select-String -Path $sumsPath -Pattern "^[0-9a-fA-F]{64}\s+$escaped$" | Select-Object -First 1
+        if ($line) { return (($line.Line -split '\s+')[0]).Trim() }
+    }
+    return $null
+}
+
 function Invoke-Install {
     <#
     .SYNOPSIS
@@ -276,13 +304,22 @@ function Invoke-Install {
     }
     Write-Success "$InstallDir"
 
+    # ── Download SHA256SUMS（best-effort，用于校验，issue #29）─────────────
+    $sumsMirrors = @(
+        "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/SHA256SUMS",
+        "https://cdn.jsdelivr.net/gh/$RepoOwner/$RepoName@$RepoBranch/SHA256SUMS",
+        "https://ghproxy.com/https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/SHA256SUMS"
+    )
+    $sumsPath = Join-Path $env:TEMP "goto-github-SHA256SUMS"
+    $null = Invoke-Download -FileName 'SHA256SUMS' -Mirrors $sumsMirrors -Destination $sumsPath
+
     # ── Download fetch.sh (required) ───────────────────────────────────────
     $fetchShPath = "$InstallDir\fetch.sh"
-    $fetchSuccess = Invoke-Download -FileName 'fetch.sh' -Mirrors $FetchMirrors -Destination $fetchShPath
+    $fetchSuccess = Invoke-Download -FileName 'fetch.sh' -Mirrors $FetchMirrors -Destination $fetchShPath -ExpectedSha256 (Get-ExpectedSha256 'fetch.sh')
 
     # ── Download goto-github.ps1 (required for PowerShell users) ─────────────
     $gotoGithubPs1Path = "$InstallDir\goto-github.ps1"
-    $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path
+    $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path -ExpectedSha256 (Get-ExpectedSha256 'goto-github.ps1')
 
     # Add UTF-8 BOM to prevent Chinese character garbling on Windows PS 5.1
     if ($ps1Success) {
@@ -340,10 +377,18 @@ function Main {
         $gotoGithubPs1Path = "$InstallDir\goto-github.ps1"
 
         Write-Step "Updating fetch.sh..."
-        $fetchSuccess = Invoke-Download -FileName 'fetch.sh' -Mirrors $FetchMirrors -Destination $fetchShPath
+        $sumsMirrors = @(
+            "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/SHA256SUMS",
+            "https://cdn.jsdelivr.net/gh/$RepoOwner/$RepoName@$RepoBranch/SHA256SUMS",
+            "https://ghproxy.com/https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/SHA256SUMS"
+        )
+        $sumsPath = Join-Path $env:TEMP "goto-github-SHA256SUMS"
+        $null = Invoke-Download -FileName 'SHA256SUMS' -Mirrors $sumsMirrors -Destination $sumsPath
+
+        $fetchSuccess = Invoke-Download -FileName 'fetch.sh' -Mirrors $FetchMirrors -Destination $fetchShPath -ExpectedSha256 (Get-ExpectedSha256 'fetch.sh')
 
         Write-Step "Updating goto-github.ps1..."
-        $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path
+        $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path -ExpectedSha256 (Get-ExpectedSha256 'goto-github.ps1')
 
         # Add UTF-8 BOM to prevent Chinese character garbling on Windows PS 5.1
         if ($ps1Success) {
