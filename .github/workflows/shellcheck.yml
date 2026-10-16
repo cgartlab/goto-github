@@ -52,8 +52,12 @@ jobs:
       - name: Run PSScriptAnalyzer on *.ps1
         shell: pwsh
         run: |
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
-          $violations = Invoke-ScriptAnalyzer -Path (Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object FullName) `
+          # runner 预装 PSScriptAnalyzer；缺失才安装
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          $targets = @(Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object { $_.FullName })
+          $violations = Invoke-ScriptAnalyzer -Path $targets `
             -Severity @('Error', 'Warning') `
             -ExcludeRule @('PSAvoidUsingWriteHost', 'PSAvoidUsingPlainTextForPassword', 'PSUseDeclaredVarsMoreThanAssignments', 'PSReviewUnusedParameter', 'PSUseShouldProcessForStateChangingFunctions') 2>$null
           if ($violations) {
