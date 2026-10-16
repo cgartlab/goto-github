@@ -7,12 +7,14 @@ on:
     paths:
       - 'fetch.sh'
       - 'install.sh'
+      - '*.ps1'
       - 'tests/**'
   pull_request:
     branches: [main]
     paths:
       - 'fetch.sh'
       - 'install.sh'
+      - '*.ps1'
       - 'tests/**'
 
 permissions:
@@ -40,3 +42,22 @@ jobs:
 
       - name: Run unit tests
         run: bash tests/test_functions.sh
+
+  pwsh-lint:
+    name: PowerShell lint (PSScriptAnalyzer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run PSScriptAnalyzer on *.ps1
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          $violations = Invoke-ScriptAnalyzer -Path (Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object FullName) `
+            -Severity @('Error', 'Warning') `
+            -ExcludeRule @('PSAvoidUsingWriteHost', 'PSAvoidUsingPlainTextForPassword', 'PSUseDeclaredVarsMoreThanAssignments', 'PSReviewUnusedParameter', 'PSUseShouldProcessForStateChangingFunctions') 2>$null
+          if ($violations) {
+            $violations | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer passed"
