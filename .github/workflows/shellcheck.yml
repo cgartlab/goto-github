@@ -56,11 +56,15 @@ jobs:
           if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
             Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
           }
-          $targets = @(Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object { $_.FullName })
-          $violations = Invoke-ScriptAnalyzer -Path $targets `
-            -Severity @('Error', 'Warning') `
-            -ExcludeRule @('PSAvoidUsingWriteHost', 'PSAvoidUsingPlainTextForPassword', 'PSUseDeclaredVarsMoreThanAssignments', 'PSReviewUnusedParameter', 'PSUseShouldProcessForStateChangingFunctions') 2>$null
-          if ($violations) {
+          # 逐文件分析：-Path 对数组绑定的行为随版本不稳，单文件传最稳
+          $violations = @()
+          foreach ($f in (Get-ChildItem -Recurse -Filter *.ps1)) {
+            $v = Invoke-ScriptAnalyzer -Path $f.FullName `
+              -Severity @('Error', 'Warning') `
+              -ExcludeRule @('PSAvoidUsingWriteHost', 'PSAvoidUsingPlainTextForPassword', 'PSUseDeclaredVarsMoreThanAssignments', 'PSReviewUnusedParameter', 'PSUseShouldProcessForStateChangingFunctions') 2>$null
+            if ($v) { $violations += $v }
+          }
+          if ($violations.Count -gt 0) {
             $violations | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize
             exit 1
           }
