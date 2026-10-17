@@ -18,7 +18,7 @@ jobs:
         id: app-token
         # dependabot 分支的 workflow secrets 上下文为空（GitHub 安全机制），跳过以免 review check 恒失败
         if: github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]'
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.ARGUS_FLASH_APP_ID }}
           private-key: ${{ secrets.ARGUS_FLASH_PRIVATE_KEY }}
