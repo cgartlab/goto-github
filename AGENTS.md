@@ -23,8 +23,10 @@ goto-github/
 ├── AGENTS.md
 ├── LICENSE
 └── .github/workflows/
-    ├── shellcheck.yml      # Lint CI
-    └── opencode.yml        # AI review CI
+    ├── shellcheck.yml      # Lint CI（shellcheck fetch.sh install.sh tests/）
+    ├── argus-review.yml    # AI review CI（argus-flash App；dependabot PR 跳过）
+    ├── auto-assign.yml     # PR 自动 assign 作者
+    └── pr-automation.yml   # 分支名自动打标 + assign + PC Automatic project board
 ```
 
 ## COMMANDS
