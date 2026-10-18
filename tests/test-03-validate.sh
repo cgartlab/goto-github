@@ -79,7 +79,7 @@ test_verify_hosts_missing_block() {
 test_verify_hosts_too_few_entries() {
     local f="$TEST_TMP_DIR/hosts_few"
     printf '%s\n140.82.112.3 github.com\n%s\n' "$MARKER_START" "$MARKER_END" > "$f"
-    HOSTS_FILE="$f"
+    export HOSTS_FILE="$f"
     if verify_hosts >/dev/null 2>&1; then
         echo "    <10 entries must fail verification" >&2
         return 1
