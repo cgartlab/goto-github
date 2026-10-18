@@ -62,6 +62,18 @@ $Ps1Mirrors = @(
     "https://ghproxy.com/https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/goto-github.ps1"
 )
 
+# fetch.sh sources these modules; they must be downloaded alongside it.
+$LibModules = @('00-constants', '01-utils', '02-fetch', '03-validate', '04-apply')
+
+function Get-LibMirrors {
+    param([string]$Module)
+    @(
+        "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/lib/$Module.sh"
+        "https://cdn.jsdelivr.net/gh/$RepoOwner/$RepoName@$RepoBranch/lib/$Module.sh"
+        "https://ghproxy.com/https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoBranch/lib/$Module.sh"
+    )
+}
+
 # ── Helper functions ───────────────────────────────────────────────────────────
 
 function Test-IsWSL {
@@ -317,6 +329,23 @@ function Invoke-Install {
     $fetchShPath = "$InstallDir\fetch.sh"
     $fetchSuccess = Invoke-Download -FileName 'fetch.sh' -Mirrors $FetchMirrors -Destination $fetchShPath -ExpectedSha256 (Get-ExpectedSha256 'fetch.sh')
 
+    # ── Download lib/ modules (required by fetch.sh) ─────────────────────────
+    if ($fetchSuccess) {
+        $libDir = "$InstallDir\lib"
+        $null = New-Item -ItemType Directory -Force -Path $libDir
+        $libOk = $true
+        foreach ($mod in $LibModules) {
+            $libDest = "$libDir\$mod.sh"
+            if (-not (Invoke-Download -FileName "lib/$mod.sh" -Mirrors (Get-LibMirrors $mod) -Destination $libDest -ExpectedSha256 (Get-ExpectedSha256 "lib/$mod.sh"))) {
+                $libOk = $false
+            }
+        }
+        if (-not $libOk) {
+            Write-ErrorMsg "Failed to download one or more lib/ modules."
+            $fetchSuccess = $false
+        }
+    }
+
     # ── Download goto-github.ps1 (required for PowerShell users) ─────────────
     $gotoGithubPs1Path = "$InstallDir\goto-github.ps1"
     $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path -ExpectedSha256 (Get-ExpectedSha256 'goto-github.ps1')
@@ -386,6 +415,18 @@ function Main {
         $null = Invoke-Download -FileName 'SHA256SUMS' -Mirrors $sumsMirrors -Destination $sumsPath
 
         $fetchSuccess = Invoke-Download -FileName 'fetch.sh' -Mirrors $FetchMirrors -Destination $fetchShPath -ExpectedSha256 (Get-ExpectedSha256 'fetch.sh')
+
+        # lib/ modules are required by fetch.sh — keep them in sync too
+        if ($fetchSuccess) {
+            $libDir = "$InstallDir\lib"
+            $null = New-Item -ItemType Directory -Force -Path $libDir
+            foreach ($mod in $LibModules) {
+                $libDest = "$libDir\$mod.sh"
+                if (-not (Invoke-Download -FileName "lib/$mod.sh" -Mirrors (Get-LibMirrors $mod) -Destination $libDest -ExpectedSha256 (Get-ExpectedSha256 "lib/$mod.sh"))) {
+                    $fetchSuccess = $false
+                }
+            }
+        }
 
         Write-Step "Updating goto-github.ps1..."
         $ps1Success = Invoke-Download -FileName 'goto-github.ps1' -Mirrors $Ps1Mirrors -Destination $gotoGithubPs1Path -ExpectedSha256 (Get-ExpectedSha256 'goto-github.ps1')

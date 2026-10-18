@@ -2,28 +2,31 @@
 
 ## Project Overview
 
-**GoToGitHub** — A single-script tool that fetches community-maintained GitHub domain mappings from [GitHub520](https://github.com/521xueweihan/GitHub520) and writes them to `/etc/hosts`. No scanning, no Python, no CI.
+**GoToGitHub** — A Bash + PowerShell tool that fetches community-maintained GitHub domain mappings from [GitHub520](https://github.com/521xueweihan/GitHub520) and writes them to `/etc/hosts`. No scanning, no Python. The bash implementation is a thin `fetch.sh` entry point plus `lib/` modules (unit-tested, mock curl, no network).
 
 ## Architecture
 
 ```
-fetch.sh                  # Core logic (~420L, pure Bash 3.2+, Unix/Linux/macOS/Git Bash)
+fetch.sh                  # Thin entry point: parse args -> source lib/ -> dispatch
+lib/                      # Bash implementation (sourced by fetch.sh)
+├── 00-constants.sh       # Data constants (markers, sources, probe tuning)
+├── 01-utils.sh           # Logging, platform, privilege, DNS, TCP helpers
+├── 02-fetch.sh           # Source fetching, dead-IP filter, IP probe
+├── 03-validate.sh        # Content validation, post-apply verification
+└── 04-apply.sh           # Build/apply/remove hosts block, shadowing, status
+
+fetch.sh also holds the CLI layer:
 ├── need_root()           # Privilege escalation wrapper (sudo -E)
-├── run_cycle()           # Core: fetch→apply→flush→verify (consolidated)
-├── auto_drive()           # Thin wrapper: privilege check → run_cycle
+├── run_cycle()           # Core: fetch->apply->flush->verify (consolidated)
+├── auto_drive()           # Thin wrapper: privilege check -> run_cycle
 ├── one_click_accelerate() # Thin wrapper: same for menu
 ├── interactive_menu()     # 1234Q TTY menu
-├── json_status()         # --pwsh status: pure JSON output
-├── apply_hosts()          # Write with timestamped backup
-├── restore_hosts()        # Remove goto-github block
-├── fetch_hosts_content()  # Fetch with fallback
-├── validate_hosts_content() # Verify ≥10 IPs + github.com
-└── flush_dns()           # DNS flush (macOS/Linux/Windows Git Bash)
+└── main()                 # Arg dispatch (--status/--restore/--pwsh/--probe/...)
 
 goto-github.ps1           # Pure PowerShell implementation (Windows, no bash.exe)
 ├── Test-IsAdmin          # Check admin privileges
 ├── Request-Admin         # Auto-elevate via Start-Process -Verb RunAs
-├── Test-ValidHostsContent # Verify ≥10 IPs + github.com
+├── Test-ValidHostsContent # Verify >=10 IPs + github.com
 ├── Get-HostsContent      # Fetch with fallback
 ├── Add-HostsBlock        # Write with timestamped backup
 ├── Remove-GotoBlock      # Remove goto-github block
@@ -83,13 +86,20 @@ sudo ./fetch.sh --restore   # Remove goto-github block
 
 ## CI
 
-ShellCheck runs on every push/PR touching `fetch.sh`. Config: `.github/workflows/shellcheck.yml`.
+`.github/workflows/shellcheck.yml` runs on every push/PR touching `fetch.sh`,
+`install.sh`, `lib/`, `shared/`, `tests/` or `*.ps1`:
+- ShellCheck (severity: warning) over the whole repo
+- `tests/test-*.sh` (bash unit tests, no network)
+- `shared/parity-check.sh` (bash <-> PowerShell constant parity)
+- PSScriptAnalyzer over `*.ps1`
 
 ## Development
 
 **Bash (macOS / Linux / Git Bash):**
 ```bash
-make lint                    # Run shellcheck (requires shellcheck installed)
+make lint                    # shellcheck --severity=warning (requires shellcheck)
+make test                    # bash unit tests (mock curl, no network)
+make parity                  # bash <-> PowerShell constant parity
 ./fetch.sh --status         # Test read-only path (no sudo needed)
 sudo ./fetch.sh             # Test full cycle (sudo required)
 ```
@@ -104,20 +114,25 @@ sudo ./fetch.sh             # Test full cycle (sudo required)
 
 ```
 goto-github/
-├── fetch.sh                # Core logic (~420L, pure Bash)
-├── install.sh              # Unix one-line installer (curl | bash)
+├── fetch.sh                # Thin Bash entry point (sources lib/)
+├── lib/                    # Bash modules: 00-constants .. 04-apply
+├── install.sh              # Unix one-line installer (curl | bash, downloads lib/)
 ├── goto-github.ps1         # PowerShell native (no bash.exe)
 ├── bootstrap.ps1          # Windows bootstrapper (irm | iex, recommended)
-├── install.ps1             # Windows installer (OutFile fallback)
-├── Makefile                # make lint
+├── install.ps1             # Windows installer (OutFile fallback, downloads lib/)
+├── shared/parity-check.sh  # bash <-> PowerShell constant parity check
+├── tests/                  # Bash unit tests (test-00..04-*.sh, mock curl)
+├── Makefile                # make lint / make test / make parity
 ├── .shellcheckrc           # SC1090/SC1091 disabled
 ├── .gitattributes          # text=auto (cross-platform line endings)
 ├── .github/workflows/
-│   ├── shellcheck.yml      # Lint CI (fetch.sh + install.sh)
-│   └── opencode.yml        # AI review CI
+│   ├── shellcheck.yml      # Lint + tests + parity CI
+│   ├── argus-review.yml    # AI review CI
+│   └── pr-automation.yml   # PR automation (labels/assign)
 ├── README.md
 ├── CONTRIBUTING.md
 ├── CLAUDE.md
 ├── AGENTS.md
+├── LESSONS.md
 └── LICENSE
 ```

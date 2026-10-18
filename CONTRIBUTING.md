@@ -43,7 +43,7 @@ cd goto-github
 
 1. 从 `main` 创建分支：`git switch -c dev-<feature>`
 2. 开发并提交
-3. 确保 `make lint` 通过（`shellcheck fetch.sh` 0 warnings）
+3. 确保 `make lint`（shellcheck 0 warnings）与 `make test` 通过
 4. 创建 PR 指向 `main`
 5. 合并后删除分支
 
@@ -51,28 +51,32 @@ cd goto-github
 
 ```
 goto-github/
-├── fetch.sh                # 核心逻辑 (Bash)
-├── install.sh              # Unix 一键安装
+├── fetch.sh                # Bash 入口（薄）：source lib/ 并调度
+├── lib/                    # Bash 实现模块（00-constants .. 04-apply）
+├── install.sh              # Unix 一键安装（下载 fetch.sh + lib/）
 ├── goto-github.ps1         # PowerShell 原生实现（无需 Git Bash）
 ├── bootstrap.ps1          # Windows bootstrapper (irm | iex, 推荐)
 ├── install.ps1             # Windows 一键安装 (OutFile 备用)
-├── Makefile                # Lint targets
+├── shared/parity-check.sh  # bash ↔ PowerShell 常量一致性校验
+├── tests/                  # Bash 单元测试（test-00..04-*.sh）
+├── Makefile                # make lint / make test / make parity
 ├── .shellcheckrc          # ShellCheck 配置
 ├── .gitattributes          # 跨平台行尾
 ├── README.md
 ├── CONTRIBUTING.md
 ├── CLAUDE.md
 ├── AGENTS.md
-├── LICENSE
+├── LESSONS.md
 └── .github/workflows/
-    ├── shellcheck.yml      # Lint CI
-    └── opencode.yml        # AI review CI
+    ├── shellcheck.yml      # Lint + 测试 + parity CI
+    ├── argus-review.yml    # AI review CI
+    └── pr-automation.yml   # PR 自动化（打标/指派）
 ```
 
-## Lint
+## Lint & 测试
 
 ```bash
-make lint
-# 或
-shellcheck fetch.sh install.sh
+make lint     # shellcheck --severity=warning（0 warnings）
+make test     # bash 单元测试（mock curl，无需网络）
+make parity   # bash ↔ PowerShell 常量一致性
 ```

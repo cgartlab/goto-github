@@ -1,0 +1,52 @@
+# LESSONS — goto-github
+
+> GitHub 访问加速工具：Bash 3.2+（`fetch.sh`）+ 原生 PowerShell 5.1+（`goto-github.ps1`）双实现，实时拉取社区 hosts 源写入本地 hosts，含 IP 探测兜底与一键安装。
+> 本仓库从真实失误沉淀的「教训→规则」清单。**会话开始先全文阅读并遵循其中所有规则**；出现新失误按 §维护 追加。
+> 权威依据：Anthropic Claude Code memory/best practices（<200 行、具体可验证、第二次犯同样错即写入）；社区 lessons.md 惯例（Boris Cherny，Anthropic）。
+> 来源：本仓库 AGENTS.md 的 ANTI-PATTERNS / NOTES + 已验证 fix 提交；预填为种子，后续由 Agent 在真实工作中增长。
+
+## 维护
+- **触发**：用户纠正 / Agent 自查到的失误 / 非显而易见的 gotcha。
+- **格式**：`### <主题>` 下，每条 = 失误（具体场景）→ 规则（最小可执行指令），一行可验证。
+- **只记项目特有、不可从代码推断的**；通用最佳实践不写；含糊措辞（"小心""注意"）删掉。
+- **重复出现** → 升级进 `AGENTS.md` 硬规则；**月度审阅**裁剪过期项；目标 < 200 行。
+
+## hosts 安全边界
+
+- 失误：编辑了 hosts 标记区块外部 → 规则：只改 `# >>> goto-github >>>` / `# <<< goto-github <<<` 之间，区块外部一律不动（见 AGENTS.md「ANTI-PATTERNS」）
+- 失误：apply 时产生重复的 hosts 标记区块 → 规则：apply 前先清理旧标记，保证幂等（commit e00c369）
+- 失误：hosts 写入未严格错误检查，失败被静默吞掉 → 规则：hosts apply 必须 strict error checking（commit a2e81c8）
+- 失误：删除/恢复前不备份 → 规则：先备份再改，restore 与源标签要硬化（commit a26b196）
+- 失误：标记前存在其他工具写入的 github.com 条目仍继续写 → 规则：遮蔽检测要警告但不修改区块外部（见 AGENTS.md「NOTES」）
+
+## 探测与容错
+
+- 失误：单轮探测就定论，把 flaky IP 当可用；空池直接崩溃 → 规则：两轮探测过滤 flaky IP，并加空池防护（commit 37501b2）
+- 失误：探测目标用 github.com 首页，探通了但 git 流量不通 → 规则：探测目标为 git smart-http 端点（见 AGENTS.md「NOTES」）
+- 失误：curl 瞬时失败直接报错退出 → 规则：瞬时 curl 失败要重试，并且报告而非静默（commit b09700c、a5d5f71）
+- 失误：tcp 探测假阴性 → 规则：区分"连通"与"未测出"，不要用假阴性触发兜底（commit 50309d7）
+- 失误：交互删除无确认 → 规则：删除操作要确认提示（commit 50309d7）
+
+## 跨平台与编码
+
+- 失误：PowerShell 实现里重新引入 bash.exe 依赖 → 规则：Windows 走原生 pwsh 实现，不依赖 bash.exe（见 AGENTS.md「ANTI-PATTERNS」）
+- 失误：Windows `.ps1` 无 BOM，PS 5.1 下乱码 → 规则：所有 `.ps1` 加 UTF-8 BOM，`Invoke-WebRequest` 内容按 UTF-8 解码（commit 33e2c03、e4f4003、48212c6）
+- 失误：加了自解锁代码，破坏了 `[CmdletBinding]` → 规则：不要在受 `CmdletBinding` 约束的脚本里加自解锁（commit ad035f5）
+- 失误：把 WSL 当成 Windows 处理 → 规则：检测到 WSL 打印重定向消息，不支持（见 AGENTS.md「NOTES」）
+- 失误：grep 在 macOS 上不可移植 → 规则：grep 用法要考虑 BSD/GNU 差异（commit 50309d7）
+
+## 安装与发布
+
+- 失误：跳过 shellcheck 提交 → 规则：`make lint`（shellcheck fetch.sh install.sh tests/）必须 0 warnings（见 AGENTS.md「ANTI-PATTERNS」）
+- 失误：直推 `main` → 规则：始终走 PR，PR 指向 `main`（见 AGENTS.md「ANTI-PATTERNS」）
+- 失误：安装脚本无校验和，用户拿不到完整性保证 → 规则：install 加 checksum 校验（commit 915da98）
+- 失误：bootstrap 用会过期的 CDN 当主 URL → 规则：GitHub raw 作主 URL，并给下载内容加 BOM（commit 2d4db84）
+- 失误：`fetch.sh` 拆出 `lib/` 后，`install.sh`/`install.ps1` 仍只下载 `fetch.sh`，安装结果缺模块而崩溃 → 规则：安装器必须一并下载 `lib/*.sh`（含 update 路径与 SHA256SUMS 条目）
+
+## 重构与模块化
+
+- 失误：1000+ 行实现塞在单一 `fetch.sh`，函数无法直接单元测试（只能 `sed` 抽取 + `eval`）→ 规则：实现拆到 `lib/NN-*.sh`，`fetch.sh` 只做入口调度，测试直接 `source` 模块
+- 失误：`fetch.sh` 经符号链接安装后，用 `dirname "$0"` 定位 `lib/` 会指向 `~/.local/bin` → 规则：解析 `BASH_SOURCE[0]` 并跟随符号链接（`while [ -L ]` + `readlink`）取得真实脚本目录
+- 失误：新增 `.sh` 文件后 `Makefile`/CI 仍只 lint 旧文件 → 规则：lint 覆盖 `fetch.sh install.sh lib/ shared/ tests/`，`make test` 用 `tests/test-*.sh` 通配
+- 失误：`SHA256SUMS` 里 `.ps1` 记录的是 CRLF 工作树哈希，与 raw 提供的 LF blob 不一致 → 规则：`SHA256SUMS` 以 LF blob 计算（`.sh` 已 `eol=lf`）；改动 `fetch.sh` 后必须重算其哈希
+- 失误：把 `fetch.sh` 改成 `source lib/` 会改变分发形态（单文件 → 多文件）→ 规则：此类架构变更先与用户确认方向（拉取 vs 扫描、单文件 vs 多文件），再动手
