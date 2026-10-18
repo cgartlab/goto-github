@@ -10,17 +10,20 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Generate argus-flash token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        # dependabot 分支的 workflow secrets 上下文为空（GitHub 安全机制），跳过以免 review check 恒失败
+        if: github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]'
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.ARGUS_FLASH_APP_ID }}
           private-key: ${{ secrets.ARGUS_FLASH_PRIVATE_KEY }}
 
       - uses: cgartlab/argus/.github/actions/argus-review@main
+        if: github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]'
         with:
           github-token: ${{ steps.app-token.outputs.token }}

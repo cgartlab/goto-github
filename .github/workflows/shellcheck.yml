@@ -29,7 +29,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run ShellCheck (whole repo)
         uses: ludeeus/action-shellcheck@master
@@ -50,7 +50,7 @@ jobs:
     name: PowerShell lint (PSScriptAnalyzer)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run PSScriptAnalyzer on *.ps1
         shell: pwsh
