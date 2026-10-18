@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # GoToGitHub — One-line installer with mirror fallback
-# Downloads fetch.sh and sets up the goto-github command in ~/.local/bin.
-# Supports multiple mirror sources for regions with GitHub access issues.
+# Downloads fetch.sh + its lib/ modules and sets up the goto-github command in
+# ~/.local/bin. Supports multiple mirror sources for regions with GitHub
+# access issues.
 # =============================================================================
 # Usage:
 #   curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash
@@ -16,25 +17,36 @@ set -euo pipefail
 
 VERSION="1.0.0"
 
-# Mirror sources for fetch.sh (in order of preference)
-# Each source is tried until one succeeds
-# Override with: export GOTO_GITHUB_MIRRORS="url1 url2 ..."
+# Mirror base URLs (repo root, no trailing file path), tried in order.
+# Override with: export GOTO_GITHUB_MIRRORS="base1 base2 ..."
+# For backwards compatibility, a trailing "/fetch.sh" on an entry is stripped.
 if [ -n "${GOTO_GITHUB_MIRRORS:-}" ]; then
     IFS=' ' read -r -a MIRRORS <<< "${GOTO_GITHUB_MIRRORS}"
 else
     MIRRORS=(
-        "https://raw.githubusercontent.com/cgartlab/goto-github/main/fetch.sh"
-        "https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/fetch.sh"
-        "https://ghproxy.com/https://raw.githubusercontent.com/cgartlab/goto-github/main/fetch.sh"
+        "https://raw.githubusercontent.com/cgartlab/goto-github/main"
+        "https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main"
+        "https://ghproxy.com/https://raw.githubusercontent.com/cgartlab/goto-github/main"
     )
 fi
+# Normalise each mirror to a base URL (strip a trailing /fetch.sh if present).
+_normalised=()
+for _m in "${MIRRORS[@]}"; do
+    _normalised+=("${_m%/fetch.sh}")
+done
+MIRRORS=("${_normalised[@]}")
+unset _normalised _m
 
 INSTALL_DIR="${HOME}/.local/share/goto-github"
+LIB_DIR="${INSTALL_DIR}/lib"
 BIN_DIR="${HOME}/.local/bin"
 SYMLINK="${BIN_DIR}/goto-github"
 SCRIPT_PATH="${INSTALL_DIR}/fetch.sh"
 CURL_RETRY_OPTS=(--retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60)
 VERSION_FILE="${INSTALL_DIR}/VERSION"
+
+# fetch.sh sources these modules; they must ship alongside it.
+LIB_MODULES=(00-constants 01-utils 02-fetch 03-validate 04-apply)
 
 # Colors
 RED='\033[0;31m'
@@ -46,49 +58,62 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
+# ── Download one repo file with mirror fallback ──────────────────────────────
+# download_file <repo-relative-path> <destination>
+download_file() {
+    local rel="$1" dest="$2" base url tmp
+    tmp="${dest}.tmp"
+    for base in "${MIRRORS[@]}"; do
+        url="${base}/${rel}"
+        log_info "  Attempting: $url"
+        if curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "$url" -o "$tmp" 2>/dev/null; then
+            if bash -n "$tmp" 2>/dev/null; then
+                mv "$tmp" "$dest"
+                log_info "  ✓ ${rel}"
+                return 0
+            fi
+            log_warn "  ✗ invalid syntax: ${url}"
+            rm -f "$tmp"
+        else
+            log_warn "  ✗ failed: ${url}"
+            rm -f "$tmp"
+        fi
+    done
+    return 1
+}
+
 # ── Install ──────────────────────────────────────────────────────────────────
 do_install() {
     log_info "Creating directories..."
     mkdir -p "${INSTALL_DIR}"
+    mkdir -p "${LIB_DIR}"
     mkdir -p "${BIN_DIR}"
 
-    log_info "Downloading fetch.sh..."
+    log_info "Downloading fetch.sh + lib/ modules..."
     log_info "Trying mirror sources..."
 
-    local downloaded=false
-    for mirror in "${MIRRORS[@]}"; do
-        log_info "  Attempting: $mirror"
-        if curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "${mirror}" -o "${SCRIPT_PATH}.tmp" 2>/dev/null; then
-            # Validate the downloaded file
-            if bash -n "${SCRIPT_PATH}.tmp" 2>/dev/null; then
-                mv "${SCRIPT_PATH}.tmp" "${SCRIPT_PATH}"
-                log_info "  ✓ Successfully downloaded from: $mirror"
-                downloaded=true
-                break
-            else
-                log_warn "  ✗ Invalid syntax from: $mirror"
-                rm -f "${SCRIPT_PATH}.tmp"
-            fi
-        else
-            log_warn "  ✗ Failed to download from: $mirror"
-        fi
-    done
-
-    if [ "$downloaded" = false ]; then
-        log_error "All mirror sources failed. Please check your network connection."
-        rm -f "${SCRIPT_PATH}.tmp"
+    if ! download_file "fetch.sh" "${SCRIPT_PATH}"; then
+        log_error "Failed to download fetch.sh from all mirrors."
         echo ""
         echo "  Alternative: Download manually from GitHub:"
-        echo "    mkdir -p ${INSTALL_DIR}"
+        echo "    mkdir -p ${INSTALL_DIR}/lib"
         echo "    curl -L https://github.com/cgartlab/goto-github/raw/main/fetch.sh -o ${SCRIPT_PATH}"
+        for _mod in "${LIB_MODULES[@]}"; do
+            echo "    curl -L https://github.com/cgartlab/goto-github/raw/main/lib/${_mod}.sh -o ${LIB_DIR}/${_mod}.sh"
+        done
         echo "    chmod +x ${SCRIPT_PATH}"
         echo "    ln -sf ${SCRIPT_PATH} ${SYMLINK}"
         echo ""
         exit 1
     fi
 
-    log_info "Validating syntax..."
-    bash -n "${SCRIPT_PATH}"
+    local mod
+    for mod in "${LIB_MODULES[@]}"; do
+        if ! download_file "lib/${mod}.sh" "${LIB_DIR}/${mod}.sh"; then
+            log_error "Failed to download lib/${mod}.sh from all mirrors."
+            exit 1
+        fi
+    done
 
     chmod +x "${SCRIPT_PATH}"
 
@@ -153,32 +178,23 @@ do_update() {
         exit 1
     fi
 
-    log_info "Updating fetch.sh..."
+    log_info "Updating fetch.sh + lib/ modules..."
     log_info "Trying mirror sources..."
 
-    local downloaded=false
-    for mirror in "${MIRRORS[@]}"; do
-        log_info "  Attempting: $mirror"
-        if curl -sfL "${CURL_RETRY_OPTS[@]}" --connect-timeout 10 --max-time 30 "${mirror}" -o "${SCRIPT_PATH}.tmp" 2>/dev/null; then
-            if bash -n "${SCRIPT_PATH}.tmp" 2>/dev/null; then
-                mv "${SCRIPT_PATH}.tmp" "${SCRIPT_PATH}"
-                log_info "  ✓ Successfully updated from: $mirror"
-                downloaded=true
-                break
-            else
-                log_warn "  ✗ Invalid syntax from: $mirror"
-                rm -f "${SCRIPT_PATH}.tmp"
-            fi
-        else
-            log_warn "  ✗ Failed to download from: $mirror"
-        fi
-    done
+    mkdir -p "${LIB_DIR}"
 
-    if [ "$downloaded" = false ]; then
-        log_error "All mirror sources failed. Update aborted."
-        rm -f "${SCRIPT_PATH}.tmp"
+    if ! download_file "fetch.sh" "${SCRIPT_PATH}"; then
+        log_error "Failed to update fetch.sh from all mirrors. Update aborted."
         exit 1
     fi
+
+    local mod
+    for mod in "${LIB_MODULES[@]}"; do
+        if ! download_file "lib/${mod}.sh" "${LIB_DIR}/${mod}.sh"; then
+            log_error "Failed to update lib/${mod}.sh from all mirrors. Update aborted."
+            exit 1
+        fi
+    done
 
     chmod +x "${SCRIPT_PATH}"
     printf "%s\n" "${VERSION}" > "${VERSION_FILE}"
@@ -204,7 +220,7 @@ main() {
             echo "  (no flags)    Install goto-github to ~/.local/bin"
             echo "  --uninstall   Remove goto-github and its files"
             echo "  --version,-v  Show installed version or 'not installed'"
-            echo "  --update      Re-download and replace fetch.sh"
+            echo "  --update      Re-download and replace fetch.sh + lib/"
             echo "  --help,-h     Show this help"
             echo ""
             echo "Quick install:"
