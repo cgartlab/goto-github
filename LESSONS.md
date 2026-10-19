@@ -26,6 +26,8 @@
 - 失误：curl 瞬时失败直接报错退出 → 规则：瞬时 curl 失败要重试，并且报告而非静默（commit b09700c、a5d5f71）
 - 失误：tcp 探测假阴性 → 规则：区分"连通"与"未测出"，不要用假阴性触发兜底（commit 50309d7）
 - 失误：交互删除无确认 → 规则：删除操作要确认提示（commit 50309d7）
+- 失误：`ForEach-Object -Parallel -AsArray` —— `-AsArray` 不是 `ForEach-Object` 的参数（PS 7.6.7 参数表里没有），并行扫描调用**在探测任何 IP 之前就因参数绑定失败而抛错**；且 `-Parallel` 在隔离 runspace 执行，父作用域的函数（`Test-Ip`/`Find-Curl`）与 `$script:` 变量在块内都不可见，`param()` 也收不到管道值（commit 292b28f）。规则：向并行块传值只能用 `$using:`（变量）或环境变量（配置），块内不得调用父作用域函数；`-Parallel` 无 `-AsArray`，用 `@(...)` 防止单元素结果被拆成标量
+- 失误：上面那个 bug 之所以漏进主干——`test-ps-02` 只测了纯数学的 `Expand-CidrToIPs`，从不触达并行扫描路径，CI 因此全绿而功能完全不可用。规则：**"未触达的代码路径"比"测试较少"更危险**；并发/IO 路径必须用 mock（`Find-Curl` 返回 `mock-curl.cmd`）至少覆盖一次，且要验证"坏代码会让测试变红"（把 bug 临时还原一次确认 FAIL，再复原）
 
 ## 跨平台与编码
 
@@ -34,6 +36,7 @@
 - 失误：加了自解锁代码，破坏了 `[CmdletBinding]` → 规则：不要在受 `CmdletBinding` 约束的脚本里加自解锁（commit ad035f5）
 - 失误：把 WSL 当成 Windows 处理 → 规则：检测到 WSL 打印重定向消息，不支持（见 AGENTS.md「NOTES」）
 - 失误：grep 在 macOS 上不可移植 → 规则：grep 用法要考虑 BSD/GNU 差异（commit 50309d7）
+- 失误：把 `ps1/` 的测试想当然塞进 ubuntu-latest 的同一个 job——其 curl 替身是 `mock-curl.cmd`（cmd batch），且被测代码写 `C:\...\etc\hosts`、用 `WindowsIdentity` 判 UAC、读 HKLM DNS 注册表，Linux 上必然红 → 规则：平台相关的实现用独立 job 跑对应 OS（`pwsh-test` → `windows-latest`）；平台无关的静态检查仍可共用（PSScriptAnalyzer 与 OS 无关）。判断依据是"被测代码依赖什么"，不是"测试文件后缀是什么"
 
 ## 安装与发布
 

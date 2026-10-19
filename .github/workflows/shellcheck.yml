@@ -10,6 +10,7 @@ on:
       - 'lib/**'
       - 'shared/**'
       - '*.ps1'
+      - 'ps1/**'
       - 'tests/**'
   pull_request:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - 'lib/**'
       - 'shared/**'
       - '*.ps1'
+      - 'ps1/**'
       - 'tests/**'
 
 permissions:
@@ -74,3 +76,31 @@ jobs:
             if ($errs.Count -gt 0) { exit 1 }
           }
           Write-Host "PSScriptAnalyzer passed (no errors; style warnings informational)"
+
+  pwsh-test:
+    # Scan-based PowerShell implementation under ps1/. Runs on windows-latest
+    # because it targets C:\...\etc\hosts, WindowsIdentity (UAC) and the HKLM DNS
+    # registry, and its curl mock is a .cmd file. Lint above stays on ubuntu
+    # because PSScriptAnalyzer is platform-independent.
+    name: PowerShell tests (ps1/)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run ps1/ unit tests
+        shell: pwsh
+        run: |
+          $fail = 0
+          foreach ($f in (Get-ChildItem -Path tests -Filter 'test-ps-*.ps1' | Sort-Object Name)) {
+            Write-Host "== $($f.Name) =="
+            # try/catch: a terminating error inside a test must not abort the
+            # step before the remaining files run (it would hide other failures).
+            try {
+              & $f.FullName
+              if ($LASTEXITCODE -ne 0) { $fail = 1 }
+            } catch {
+              Write-Host "  EXCEPTION: $_"
+              $fail = 1
+            }
+          }
+          exit $fail
