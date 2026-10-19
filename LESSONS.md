@@ -50,3 +50,7 @@
 - 失误：新增 `.sh` 文件后 `Makefile`/CI 仍只 lint 旧文件 → 规则：lint 覆盖 `fetch.sh install.sh lib/ shared/ tests/`，`make test` 用 `tests/test-*.sh` 通配
 - 失误：`SHA256SUMS` 里 `.ps1` 记录的是 CRLF 工作树哈希，与 raw 提供的 LF blob 不一致 → 规则：`SHA256SUMS` 以 LF blob 计算（`.sh` 已 `eol=lf`）；改动 `fetch.sh` 后必须重算其哈希
 - 失误：把 `fetch.sh` 改成 `source lib/` 会改变分发形态（单文件 → 多文件）→ 规则：此类架构变更先与用户确认方向（拉取 vs 扫描、单文件 vs 多文件），再动手
+- 失误：`parity-check.sh` 只校验根 `goto-github.ps1`，漏掉 `ps1/lib/00-constants.ps1`；后者一旦漂移，两套 PS 实现写出互不可见的 hosts 块而 CI 无感 → 规则：parity 覆盖所有已存在的 PS 常量文件；文件缺失必须显式 `SKIP:` 并说明未校验，绝不静默当作已校验
+- 失误：`extract_ps_marker` 内 `grep | head -1 | sed` 在 grep 无匹配时返回非 0，`set -o errexit -o pipefail` 在命令替换处直接中止，`die()` 不被调用 → 症状是 exit=1 但 stderr 空（CI 失败无诊断）→ 规则：提取函数末尾 `return 0`，调用处显式检查空值并分别报"未声明"与"值漂移"
+- 失误：双引号正则里写 `"\$?script:$var"`，shellcheck 0.11 报 SC1087（把 `$?script` 当数组展开）→ 规则：正则用拼接构造，`\$?script:` 留在单引号字面量里；`sed` 里的 `\$` 同样转义
+- 失误：bash 测试 harness 用 `out=$(cmd); rc=$?` 但外层 `set -e`，命令替换失败即中止外层，后续 echo 全不执行——误判成"被测脚本静默失败"→ 规则：捕获退出码必须 `set +e` 包裹；heredoc 用 `<<'EOF'` 引号形式，否则 `$script:` 被 shell 展开成 `:`，测出的内容根本不是想要的

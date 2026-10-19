@@ -93,7 +93,7 @@ goto-github/
 - 无 Python 依赖
 - 单元测试：`tests/test-00..04-*.sh`（mock curl，无需网络）；`make test` 逐个运行
 - Bash 结构：`fetch.sh` 只做参数解析与调度，实现都在 `lib/`；新增功能改 `lib/`，不要在 `fetch.sh` 里重复实现
-- 常量一致性：`shared/parity-check.sh`（`make parity`）保证 bash 与 PowerShell 的标记与数据源列表一致
+- 常量一致性：`shared/parity-check.sh`（`make parity`）保证 bash 与所有已存在的 PowerShell 实现（根 `goto-github.ps1` 拉取式、`ps1/lib/00-constants.ps1` 扫描式）标记一致，且根实现的社区源列表一致；可选文件缺失时输出显式 `SKIP:`，不当作已校验
 - 探测兜底：所有源核心 IP 不可达时，从源 IP 扩展 ±7 的 /24 候选池并发探测，目标为 git smart-http 端点而非 github.com 首页（部分边缘 IP 返回首页但不通 git 流量）
 - 遮蔽检测：标记之前存在其他工具写入的 github.com 条目时警告（不修改标记区块外部）
 - Hosts 标记：`# >>> goto-github >>>` / `# <<< goto-github <<<`
