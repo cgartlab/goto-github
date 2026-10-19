@@ -34,6 +34,7 @@
 - 失误：加了自解锁代码，破坏了 `[CmdletBinding]` → 规则：不要在受 `CmdletBinding` 约束的脚本里加自解锁（commit ad035f5）
 - 失误：把 WSL 当成 Windows 处理 → 规则：检测到 WSL 打印重定向消息，不支持（见 AGENTS.md「NOTES」）
 - 失误：grep 在 macOS 上不可移植 → 规则：grep 用法要考虑 BSD/GNU 差异（commit 50309d7）
+- 失误：把 `ps1/` 的测试想当然塞进 ubuntu-latest 的同一个 job——其 curl 替身是 `mock-curl.cmd`（cmd batch），且被测代码写 `C:\...\etc\hosts`、用 `WindowsIdentity` 判 UAC、读 HKLM DNS 注册表，Linux 上必然红 → 规则：平台相关的实现用独立 job 跑对应 OS（`pwsh-test` → `windows-latest`）；平台无关的静态检查仍可共用（PSScriptAnalyzer 与 OS 无关）。判断依据是"被测代码依赖什么"，不是"测试文件后缀是什么"
 
 ## 安装与发布
 

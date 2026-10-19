@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**GoToGitHub** — A Bash + PowerShell tool that fetches community-maintained GitHub domain mappings from [GitHub520](https://github.com/521xueweihan/GitHub520) and writes them to `/etc/hosts`. No scanning, no Python. The bash implementation is a thin `fetch.sh` entry point plus `lib/` modules (unit-tested, mock curl, no network).
+**GoToGitHub** — A Bash + PowerShell tool that fetches community-maintained GitHub domain mappings from [GitHub520](https://github.com/521xueweihan/GitHub520) and writes them to `/etc/hosts`. No Python. The bash implementation is a thin `fetch.sh` entry point plus `lib/` modules (unit-tested, mock curl, no network). There are **two PowerShell implementations**: the shipped pull-based `goto-github.ps1` and an experimental scan-based one under `ps1/` — see NOTES in AGENTS.md.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ fetch.sh also holds the CLI layer:
 ├── interactive_menu()     # 1234Q TTY menu
 └── main()                 # Arg dispatch (--status/--restore/--pwsh/--probe/...)
 
-goto-github.ps1           # Pure PowerShell implementation (Windows, no bash.exe)
+goto-github.ps1           # Pure PowerShell, pull-based (shipped). Windows, no bash.exe
 ├── Test-IsAdmin          # Check admin privileges
 ├── Request-Admin         # Auto-elevate via Start-Process -Verb RunAs
 ├── Test-ValidHostsContent # Verify >=10 IPs + github.com
@@ -33,7 +33,16 @@ goto-github.ps1           # Pure PowerShell implementation (Windows, no bash.exe
 ├── Clear-DnsCache        # DNS flush via ipconfig
 ├── Test-HostsVerification # Verify github.com reachable via IP
 └── Get-JSONStatus        # --pwsh status: pure JSON output
+
+ps1/                      # Experimental scan-based PowerShell implementation
+├── goto-github.ps1       # UAC elevation -> source lib/ -> dispatch <command>
+└── lib/                  # 00-constants .. 06-uninstall
 ```
+
+`ps1/` scans its own CIDR ranges instead of pulling community sources. It shares
+the same hosts markers, so installing both overwrites each other, and its CLI is
+different (`run|install|status|help|uninstall` vs `--pwsh auto|status|restore`).
+`install.ps1` does **not** download it — it is opt-in only.
 
 ### Multi-Platform Installers
 
@@ -87,11 +96,13 @@ sudo ./fetch.sh --restore   # Remove goto-github block
 ## CI
 
 `.github/workflows/shellcheck.yml` runs on every push/PR touching `fetch.sh`,
-`install.sh`, `lib/`, `shared/`, `tests/` or `*.ps1`:
+`install.sh`, `lib/`, `shared/`, `tests/`, `ps1/` or `*.ps1`:
 - ShellCheck (severity: warning) over the whole repo
 - `tests/test-*.sh` (bash unit tests, no network)
 - `shared/parity-check.sh` (bash <-> PowerShell constant parity)
-- PSScriptAnalyzer over `*.ps1`
+- PSScriptAnalyzer over `*.ps1` (ubuntu-latest; platform-independent)
+- `tests/test-ps-*.ps1` (ps1/ scan-based tests, **windows-latest** — the code
+  writes `C:\...\etc\hosts`, checks UAC and reads the HKLM DNS registry)
 
 ## Development
 
@@ -108,6 +119,7 @@ sudo ./fetch.sh             # Test full cycle (sudo required)
 ```powershell
 .\goto-github.ps1 --pwsh status  # Test status endpoint
 .\goto-github.ps1 --pwsh auto    # Test full cycle (requires admin)
+make ps-test               # Tests for ps1/ — Windows only
 ```
 
 ## File Layout
@@ -117,12 +129,13 @@ goto-github/
 ├── fetch.sh                # Thin Bash entry point (sources lib/)
 ├── lib/                    # Bash modules: 00-constants .. 04-apply
 ├── install.sh              # Unix one-line installer (curl | bash, downloads lib/)
-├── goto-github.ps1         # PowerShell native (no bash.exe)
+├── goto-github.ps1         # PowerShell native, pull-based (shipped)
+├── ps1/                    # PowerShell scan-based (experimental, opt-in)
 ├── bootstrap.ps1          # Windows bootstrapper (irm | iex, recommended)
 ├── install.ps1             # Windows installer (OutFile fallback, downloads lib/)
 ├── shared/parity-check.sh  # bash <-> PowerShell constant parity check
-├── tests/                  # Bash unit tests (test-00..04-*.sh, mock curl)
-├── Makefile                # make lint / make test / make parity
+├── tests/                  # Unit tests (bash test-00..04-*.sh, ps test-ps-00..04-*.ps1)
+├── Makefile                # make lint / make test / make parity / make ps-test
 ├── .shellcheckrc           # SC1090/SC1091 disabled
 ├── .gitattributes          # text=auto (cross-platform line endings)
 ├── .github/workflows/

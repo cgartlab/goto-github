@@ -19,15 +19,21 @@ goto-github/
 │   ├── 03-validate.sh      # 内容校验、应用后验证
 │   └── 04-apply.sh         # 写入/移除 hosts、遮蔽检测、状态
 ├── install.sh             # Unix 一键安装 (curl | bash，含 lib/)
-├── goto-github.ps1         # PowerShell 原生实现 (无需 Git Bash)
+├── goto-github.ps1         # PowerShell 原生实现（拉取式，已发布）
+├── ps1/                    # PowerShell 扫描式实现（实验性，默认不发布）
+│   ├── goto-github.ps1     # 入口：UAC 提权 → source lib/ → 按 <command> 调度
+│   └── lib/                # 实现模块（00-constants .. 06-uninstall）
 ├── bootstrap.ps1          # Windows bootstrapper (irm | iex, 推荐)
 ├── install.ps1             # Windows 一键安装 (OutFile 备用)
 ├── shared/
 │   └── parity-check.sh     # bash ↔ PowerShell 共享常量一致性校验
-├── tests/                  # Bash 单元测试（mock curl，无需网络）
+├── tests/                  # 单元测试（mock curl，无需网络）
 │   ├── lib/test-helpers.sh
-│   └── test-00..04-*.sh
-├── Makefile                # make lint / make test / make parity
+│   ├── test-00..04-*.sh    # Bash 实现
+│   ├── lib/test-helpers.ps1
+│   ├── test-ps-00..04-*.ps1 # ps1/ 扫描式实现（Windows-only）
+│   └── mocks/mock-curl.cmd # PowerShell 测试的 curl 替身
+├── Makefile                # make lint / make test / make parity / make ps-test
 ├── .shellcheckrc           # ShellCheck 配置
 ├── .gitattributes          # 跨平台行尾
 ├── README.md
@@ -37,7 +43,7 @@ goto-github/
 ├── LESSONS.md
 ├── LICENSE
 └── .github/workflows/
-    ├── shellcheck.yml      # Lint + 测试 + parity CI
+    ├── shellcheck.yml      # Lint + 测试 + parity CI（含 windows-latest ps1/ 测试）
     ├── argus-review.yml    # AI review CI（argus-flash App；dependabot PR 跳过）
     ├── auto-assign.yml     # PR 自动 assign 作者
     └── pr-automation.yml   # 分支名自动打标 + assign + PC Automatic project board
@@ -75,7 +81,7 @@ goto-github/
 
 - **主分支**: `main`（稳定）；`dev-*` 分支开发
 - **提交**: Conventional Commits（`feat:` `fix:` `docs:` `refactor:` `chore:`）
-- **Lint**: `make lint`（shellcheck --severity=warning fetch.sh install.sh lib/ shared/ tests/，0 warnings）；`make test`（单元测试，mock curl 无需网络）；`make parity`（bash ↔ PowerShell 常量一致性）
+- **Lint**: `make lint`（shellcheck --severity=warning fetch.sh install.sh lib/ shared/ tests/，0 warnings）；`make test`（单元测试，mock curl 无需网络）；`make parity`（bash ↔ PowerShell 常量一致性）；`make ps-test`（ps1/ 扫描式实现，仅 Windows）
 - **PR**: 始终指向 `main`，禁止直推
 
 ## ANTI-PATTERNS
@@ -92,6 +98,9 @@ goto-github/
   - Windows: PowerShell 5.1+（原生，无需 Git Bash）
 - 无 Python 依赖
 - 单元测试：`tests/test-00..04-*.sh`（mock curl，无需网络）；`make test` 逐个运行
+- **两套 PowerShell 实现并存且互斥**：根 `goto-github.ps1`（拉取式，从社区源下载已验证 IP，`install.ps1` 实际发布）与 `ps1/`（扫描式，自展开 CIDR 段逐个探测，实验性，`install.ps1` **不**下载）。二者标记相同、写同一个 hosts，同装会互相覆盖；CLI 接口也不兼容（根 `--pwsh auto|status|restore|source` vs ps1/ `run|install|status|help|uninstall`）。改任一套前先确认意图，不要"顺手统一"。
+- `ps1/` 定位为**扫描式降级路径**：根 ps1 拉不到社区源时无兜底，`ps1/` 与 bash 侧 `lib/02-fetch.sh` 的 /24 探测兜底同位；代价是扫描约 1 万 IP 远重于拉取一个 hosts 文件。
+- `tests/test-ps-*.ps1` **仅 Windows 可跑**：被测代码写 `C:\...\etc\hosts`、用 `WindowsIdentity` 判 UAC、读 HKLM DNS 注册表，且 `tests/mocks/mock-curl.cmd` 是 cmd batch。CI 的 `pwsh-test` job 跑 `windows-latest`；`pwsh-lint` 仍在 ubuntu（PSScriptAnalyzer 与平台无关）
 - Bash 结构：`fetch.sh` 只做参数解析与调度，实现都在 `lib/`；新增功能改 `lib/`，不要在 `fetch.sh` 里重复实现
 - 常量一致性：`shared/parity-check.sh`（`make parity`）保证 bash 与所有已存在的 PowerShell 实现（根 `goto-github.ps1` 拉取式、`ps1/lib/00-constants.ps1` 扫描式）标记一致，且根实现的社区源列表一致；可选文件缺失时输出显式 `SKIP:`，不当作已校验
 - 探测兜底：所有源核心 IP 不可达时，从源 IP 扩展 ±7 的 /24 候选池并发探测，目标为 git smart-http 端点而非 github.com 首页（部分边缘 IP 返回首页但不通 git 流量）

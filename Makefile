@@ -1,4 +1,4 @@
-.PHONY: lint test parity
+.PHONY: lint test parity ps-test
 
 # shellcheck at warning severity (matches CI). Style/info findings are not
 # gating; warnings (e.g. unused variables, quoting) are.
@@ -18,3 +18,15 @@ test:
 	done; \
 	if [ "$$fail" -ne 0 ]; then echo "Tests FAILED"; exit 1; fi; \
 	echo "Tests passed."
+
+# Tests for the scan-based PowerShell implementation under ps1/.
+# Windows-only: the code targets C:\...\etc\hosts, WindowsIdentity (UAC) and the
+# HKLM DNS registry, and the curl mock is a .cmd file. Requires pwsh 7.
+ps-test:
+	@command -v pwsh >/dev/null 2>&1 || { echo "pwsh 7 not found. Install: winget install --id Microsoft.PowerShell"; exit 1; }
+	@fail=0; for f in tests/test-ps-*.ps1; do \
+		echo "== $$f =="; \
+		pwsh -NoProfile -File "$$f" || fail=1; \
+	done; \
+	if [ "$$fail" -ne 0 ]; then echo "PS Tests FAILED"; exit 1; fi; \
+	echo "PS Tests passed."
