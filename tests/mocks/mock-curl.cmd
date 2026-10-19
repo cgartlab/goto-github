@@ -5,7 +5,8 @@ REM PowerShell's call operator `& $path args` parses args as PS parameters,
 REM which breaks for `-o NUL` (ambiguous with -OutVariable/-OutBuffer).
 REM A .cmd file sidesteps this: cmd.exe receives the raw %* line.
 REM
-REM Usage (called by Test-IpQuick / Test-Ip):
+REM Usage (called by Test-IpQuick / Test-Ip, and by the ForEach-Object -Parallel
+REM scan blocks in Test-PriorityIp / Test-CidrRange):
 REM   mock-curl.cmd --resolve "github.com:443:IP" -s -o NUL -w "format" ...
 REM
 REM Canned responses:

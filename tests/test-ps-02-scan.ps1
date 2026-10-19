@@ -1,7 +1,9 @@
 # tests/test-ps-02-scan.ps1
-# Verifies the pure-math CIDR expansion in ps1/lib/02-scan.ps1:Expand-CidrToIPs.
-# Does NOT test Test-Ip / Test-PriorityIp / Test-CidrRange (those need curl
-# and are exercised by mock-curl.ps1 in test-ps-03-validate.ps1).
+# Verifies ps1/lib/02-scan.ps1:
+#   - Expand-CidrToIPs  (pure CIDR math, no I/O)
+#   - Test-PriorityIp / Test-CidrRange  (the ForEach-Object -Parallel scan path,
+#     exercised with tests/mocks/mock-curl.cmd so no network is touched)
+# Windows-only: the scan path shells out to a .cmd curl mock.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Split-Path -Parent $PSScriptRoot)
@@ -10,6 +12,11 @@ $repoRoot = (Split-Path -Parent $PSScriptRoot)
 $env:LOCALAPPDATA = $script:TestTmpDir
 . "$repoRoot\ps1\lib\00-constants.ps1"
 . "$repoRoot\ps1\lib\02-scan.ps1"
+
+# Mock curl + a stub Find-Curl so Test-PriorityIp / Test-CidrRange never touch
+# the network. Find-Curl is resolved at call time, so this stub wins.
+$script:MockCurl = Join-Path $repoRoot 'tests\mocks\mock-curl.cmd'
+function Find-Curl { return $script:MockCurl }
 
 # ── Test functions ─────────────────────────────────────────────────────
 
@@ -104,6 +111,65 @@ function Test_ExpandCidrToIPs_ResultIsIPv4Strings {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Test-PriorityIp / Test-CidrRange exercise the ForEach-Object -Parallel scan
+# path. These used to fail at runtime: ForEach-Object has no -AsArray parameter,
+# so the call threw a parameter-binding error before any IP was probed. They
+# were also unreachable by the earlier suite, which only covered the pure CIDR
+# math above. Guard against both regressions.
+# ---------------------------------------------------------------------------
+
+function Test_PriorityIp_ReturnsFastestResult {
+    $saved = $script:CONCURRENT_BATCH
+    $script:CONCURRENT_BATCH = 8
+    try {
+        $r = Test-PriorityIp
+    } finally {
+        $script:CONCURRENT_BATCH = $saved
+    }
+    Assert-NotEmpty $r "Priority scan must return a result when IPs respond 200"
+    Assert-True ($r.IP -match '^\d{1,3}(\.\d{1,3}){3}$') "Result IP must be an IPv4 address, got '$($r.IP)'"
+    Assert-True ($r.Time -ge 0) "Result Time must be non-negative, got '$($r.Time)'"
+}
+
+function Test_PriorityIp_SmallestWinsTieBreak {
+    $saved = $script:CONCURRENT_BATCH
+    $script:CONCURRENT_BATCH = 8
+    try {
+        $r = Test-PriorityIp
+    } finally {
+        $script:CONCURRENT_BATCH = $saved
+    }
+    # 140.82.112.3 is the only priority IP with a <0.1s canned response (0.050);
+    # every other priority IP falls back to the default 0.123s. The parallel
+    # result must therefore be the fastest one, which proves the block returned
+    # typed objects and Sort-Object -Property Time actually compared them.
+    Assert-Equals '140.82.112.3' $r.IP "Fastest priority IP should win"
+}
+
+function Test_CidrRange_ExpandsAndScans {
+    $saved = $script:CONCURRENT_BATCH
+    $script:CONCURRENT_BATCH = 25
+    try {
+        $r = Test-CidrRange
+    } finally {
+        $script:CONCURRENT_BATCH = $saved
+    }
+    Assert-NotEmpty $r "CIDR scan must return a result"
+    Assert-True ($r.IP -match '^(140\.82|185\.199|192\.30|143\.55)\.') "Result IP must come from one of the 4 CIDR ranges, got '$($r.IP)'"
+}
+
+function Test_PriorityIp_ReturnsNullWhenNoCurl {
+    $saved = $script:MockCurl
+    $script:MockCurl = ''
+    try {
+        $r = Test-PriorityIp
+    } finally {
+        $script:MockCurl = $saved
+    }
+    Assert-Equals $null $r "Scan must return \$null when curl is unavailable"
+}
+
 # ── Run all tests ──────────────────────────────────────────────────────
 
 Test-Header
@@ -116,5 +182,9 @@ Run-Test "Expand-CidrToIPs multiple ranges sum"      { Test_ExpandCidrToIPs_Mult
 Run-Test "Expand-CidrToIPs all 4 ranges = 10228"     { Test_ExpandCidrToIPs_AllInRange_Multiple }
 Run-Test "Expand-CidrToIPs shuffles each call"       { Test_ExpandCidrToIPs_Shuffled }
 Run-Test "Expand-CidrToIPs result is IPv4 strings"   { Test_ExpandCidrToIPs_ResultIsIPv4Strings }
+Run-Test "Test-PriorityIp returns fastest result"    { Test_PriorityIp_ReturnsFastestResult }
+Run-Test "Test-PriorityIp fastest IP wins tiebreak"  { Test_PriorityIp_SmallestWinsTieBreak }
+Run-Test "Test-CidrRange expands and scans"          { Test_CidrRange_ExpandsAndScans }
+Run-Test "Test-PriorityIp returns null without curl" { Test_PriorityIp_ReturnsNullWhenNoCurl }
 $rc = Test-Report
 exit $rc

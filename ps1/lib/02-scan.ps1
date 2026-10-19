@@ -110,7 +110,9 @@ function Test-PriorityIp {
     $curlPath = Find-Curl
     if (-not $curlPath) { return $null }
 
-    # Capture into local variables for $using: inside parallel runspace
+    # Capture into local variables so they are reachable via $using: from the
+    # parallel runspace (parent-scope functions and $script: vars are NOT
+    # visible in a -Parallel block).
     $localCurl = $curlPath
     $localIps = $script:PRIORITY_IPS
     $localTimeout = $script:CONNECT_TIMEOUT
@@ -118,7 +120,9 @@ function Test-PriorityIp {
     $localMinSize = $script:MIN_CONTENT_SIZE
     $localBatch = $script:CONCURRENT_BATCH
 
-    $results = $localIps | ForEach-Object -Parallel -AsArray {
+    # ForEach-Object -Parallel has no -AsArray parameter; @() stops a single
+    # result from unwrapping to a bare scalar.
+    $results = @($localIps | ForEach-Object -Parallel {
         $ip = $_
 
         $result = & $using:localCurl --resolve "github.com:443:$ip" `
@@ -141,7 +145,7 @@ function Test-PriorityIp {
         if ($size -lt $using:localMinSize) { return }
 
         [pscustomobject]@{ IP = $ip; Time = $time; Size = $size }
-    } -ThrottleLimit $localBatch
+    } -ThrottleLimit $localBatch)
 
     if (-not $results) { return $null }
 
@@ -178,7 +182,8 @@ function Test-CidrRange {
         $end = [Math]::Min($start + $localBatch - 1, $total - 1)
         $batch = $allIPs[$start..$end]
 
-        $results = $batch | ForEach-Object -Parallel -AsArray {
+        # @() because a single surviving result would otherwise unwrap to a scalar.
+        $results = @($batch | ForEach-Object -Parallel {
             $ip = $_
 
             $result = & $using:localCurl --resolve "github.com:443:$ip" `
@@ -201,7 +206,7 @@ function Test-CidrRange {
             if ($size -lt $using:localMinSize) { return }
 
             [pscustomobject]@{ IP = $ip; Time = $time; Size = $size }
-        } -ThrottleLimit $localBatch
+        } -ThrottleLimit $localBatch)
 
         if ($results) {
             $best = $results | Sort-Object Time | Select-Object -First 1
