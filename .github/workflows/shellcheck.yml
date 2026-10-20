@@ -9,9 +9,13 @@ on:
       - 'install.sh'
       - 'lib/**'
       - 'shared/**'
+      - 'scripts/**'
       - '*.ps1'
       - 'ps1/**'
       - 'tests/**'
+      - 'SKILL.md'
+      - 'references/**'
+      - 'Makefile'
   pull_request:
     branches: [main]
     paths:
@@ -19,9 +23,13 @@ on:
       - 'install.sh'
       - 'lib/**'
       - 'shared/**'
+      - 'scripts/**'
       - '*.ps1'
       - 'ps1/**'
       - 'tests/**'
+      - 'SKILL.md'
+      - 'references/**'
+      - 'Makefile'
 
 permissions:
   contents: read
@@ -47,6 +55,49 @@ jobs:
 
       - name: Check bash/PowerShell constant parity
         run: bash shared/parity-check.sh
+
+      - name: Skill script --help smoke test
+        run: |
+          fail=0
+          for f in scripts/*.sh; do
+            echo "== $f --help =="
+            bash "$f" --help >/dev/null || fail=1
+          done
+          for f in scripts/*.ps1; do
+            echo "== $f --help =="
+            pwsh -NoProfile -File "$f" --help >/dev/null 2>&1 || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "Skill script --help FAILED"
+            exit 1
+          fi
+          echo "Skill scripts OK."
+
+      - name: Validate SKILL.md frontmatter
+        run: |
+          # The skill loader reads these keys; a typo silently breaks loading.
+          missing=0
+          for key in name description license compatibility metadata; do
+            if ! grep -q "^${key}:" SKILL.md; then
+              echo "SKILL.md: missing required frontmatter key '$key'"
+              missing=1
+            fi
+          done
+          # metadata must carry a version and a date
+          if ! grep -q '^  version:' SKILL.md; then
+            echo "SKILL.md: metadata.version missing"
+            missing=1
+          fi
+          # The description must mention a trigger phrase, or the skill never fires
+          if ! grep -q 'Use this skill whenever' SKILL.md; then
+            echo "SKILL.md: description lacks a trigger clause"
+            missing=1
+          fi
+          [ "$missing" -ne 0 ] && exit 1
+          echo "SKILL.md frontmatter OK."
+
+      - name: Run skill smoke evals
+        run: bash evals/run_smoke.sh
 
   pwsh-lint:
     name: PowerShell lint (PSScriptAnalyzer)
@@ -104,3 +155,54 @@ jobs:
             }
           }
           exit $fail
+
+      - name: Run skill script tests
+        shell: pwsh
+        env:
+          GOTO_GITHUB_TEST_PRIVILEGED: '1'
+          GOTO_GITHUB_FORCE_IP: '140.82.114.21'
+        run: |
+          # Exercise the skill scripts' write path against a temp hosts file.
+          # GOTO_GITHUB_TEST_PRIVILEGED only skips the privilege check — it
+          # grants nothing, so a real system hosts file is still protected.
+          $tmp = Join-Path $env:TEMP ('goto-github-skill-test-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+          New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+          $hosts = Join-Path $tmp 'hosts'
+          "127.0.0.1 localhost`r`n# existing" | Set-Content -LiteralPath $hosts -Encoding ASCII
+          $env:HOSTS_FILE = $hosts
+          $fail = 0
+
+          Write-Host "== env_detection.ps1 =="
+          $out = & pwsh -NoProfile -File scripts\env_detection.ps1
+          if ($LASTEXITCODE -ne 0) { $fail = 1 }
+          $null = $out | ConvertFrom-Json
+
+          Write-Host "== connectivity_probe.ps1 (3 attempts) =="
+          $out = & pwsh -NoProfile -File scripts\connectivity_probe.ps1 -Attempts 3 -Timeout 4
+          if ($LASTEXITCODE -ne 0) { $fail = 1 }
+          $probe = $out | ConvertFrom-Json
+          if ($probe.endpoints.Count -ne 5) { Write-Host "  expected 5 endpoints"; $fail = 1 }
+
+          Write-Host "== hosts_apply.ps1 (forced IP, temp hosts) =="
+          $out = & pwsh -NoProfile -File scripts\hosts_apply.ps1 -Strategy priority
+          if ($LASTEXITCODE -ne 0) { $fail = 1 }
+          $apply = $out | ConvertFrom-Json
+          if (-not $apply.applied) { Write-Host "  apply did not report applied"; $fail = 1 }
+          if (-not (Select-String -Path $hosts -Pattern '# >>> goto-github >>>' -Quiet)) {
+            Write-Host "  marker block missing from hosts"; $fail = 1
+          }
+
+          Write-Host "== hosts_apply.ps1 idempotency =="
+          $null = & pwsh -NoProfile -File scripts\hosts_apply.ps1 -Strategy priority
+          $blocks = (Select-String -Path $hosts -Pattern '# >>> goto-github >>>' -AllMatches).Matches.Count
+          if ($blocks -ne 1) { Write-Host "  expected 1 marker block, found $blocks"; $fail = 1 }
+
+          Write-Host "== hosts_status.ps1 =="
+          $out = & pwsh -NoProfile -File scripts\hosts_status.ps1 -Attempts 3 -Timeout 4
+          if ($LASTEXITCODE -ne 0) { $fail = 1 }
+          $status = $out | ConvertFrom-Json
+          if (-not $status.installed) { Write-Host "  status should report installed"; $fail = 1 }
+
+          Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+          if ($fail -ne 0) { Write-Host "Skill script tests FAILED"; exit 1 }
+          Write-Host "Skill script tests passed."

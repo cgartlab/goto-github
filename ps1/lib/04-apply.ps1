@@ -9,6 +9,7 @@ function Set-HostsBlock {
     .SYNOPSIS
     Replace the goto-github section in /etc/hosts with new entries.
     Uses atomic file operations to preserve CRLF/encoding.
+    Backs up before writing; refuses to write without a backup.
     #>
     param([string]$IP)
 
@@ -36,6 +37,21 @@ function Set-HostsBlock {
 
     $content = [System.IO.File]::ReadAllText($script:HOSTS_FILE)
 
+    # ── Backup before any write ──────────────────────────────────────────────
+    # Mirrors lib/04-apply.sh: no backup means no write. A corrupt hosts file
+    # is unrecoverable without one.
+    $backup = "$($script:HOSTS_FILE).goto-github.bak.$(Get-Date -Format 'yyyyMMddHHmmss')"
+    try {
+        Copy-Item -LiteralPath $script:HOSTS_FILE -Destination $backup -ErrorAction Stop
+    } catch {
+        throw "Backup failed; aborting apply without touching hosts: $($_.Exception.Message)"
+    }
+    # Retain only the most recent KEEP_BACKUPS
+    Get-ChildItem "$($script:HOSTS_FILE).goto-github.bak.*" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip $script:KEEP_BACKUPS |
+        Remove-Item -ErrorAction SilentlyContinue
+
     # Check if marker exists
     $pattern = '(?ms)^# >>> goto-github >>>.*?# <<< goto-github <<<'
     if ([regex]::IsMatch($content, $pattern)) {
@@ -47,10 +63,15 @@ function Set-HostsBlock {
         $newContent = $content + $block.TrimEnd("`r`n") + "`r`n"
     }
 
-    # Atomic write: temp file + Move (NOT Move-Item, to avoid ACL copy step)
+    # Atomic write: temp file + Move (NOT Move-Item, to avoid ACL copy step).
+    # Preserve the original ACL: File.Move(…, overwrite) replaces the target
+    # with the temp file's ACL, which would silently drop the hosts file's
+    # permissions.
     $tempFile = [System.IO.Path]::GetTempFileName()
     try {
         [System.IO.File]::WriteAllText($tempFile, $newContent, [System.Text.UTF8Encoding]::new($false))
+        $acl = Get-Acl -LiteralPath $script:HOSTS_FILE -ErrorAction SilentlyContinue
+        if ($acl) { Set-Acl -LiteralPath $tempFile -AclObject $acl -ErrorAction SilentlyContinue }
         # File.Move on same NTFS volume is atomic via MoveFileEx(MOVEFILE_REPLACE_EXISTING)
         [System.IO.File]::Move($tempFile, $script:HOSTS_FILE, $true)
     } catch {
@@ -60,7 +81,7 @@ function Set-HostsBlock {
 
     # Update cache
     Write-Cache -Path $script:CACHE_FILE -Value $IP
-    Write-Log -Message "Applied IP $IP to $($script:HOSTS_FILE)"
+    Write-Log -Message "Applied IP $IP to $($script:HOSTS_FILE) (backup: $backup)"
 }
 
 function Clear-DnsCache {
@@ -78,6 +99,33 @@ function Clear-DnsCache {
     } catch {
         Write-Log -Message "DNS cache flush warning: $_"
     }
+}
+
+function Get-ShadowingState {
+    <#
+    .SYNOPSIS
+    Detect whether another tool's github.com entry sits ABOVE our marker block.
+    .DESCRIPTION
+    hosts resolves the FIRST match, so an entry written above our marker makes
+    the entire goto-github block inert. Returns the offending line, or $null.
+    We never edit outside the marker block — this only reports the condition.
+    Mirrors lib/04-apply.sh::check_shadowing.
+    #>
+    if (-not (Test-Path $script:HOSTS_FILE)) { return $null }
+
+    $lines = [System.IO.File]::ReadAllLines($script:HOSTS_FILE)
+    $startIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -like "$($script:MARKER_START)*") { $startIdx = $i; break }
+    }
+    if ($startIdx -le 0) { return $null }
+
+    for ($i = 0; $i -lt $startIdx; $i++) {
+        if ($lines[$i] -match '^\s*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s+github\.com(\s|$)') {
+            return $lines[$i].Trim()
+        }
+    }
+    return $null
 }
 
 function Verify-Hosts {
@@ -122,6 +170,18 @@ function Get-HostsStatus {
             $lines += '  Status:     OK (reachable)'
         } else {
             $lines += '  Status:     FAILED (not reachable)'
+        }
+
+        # Shadowing: another tool's github.com entry ABOVE our marker makes the
+        # whole block inert (hosts resolves the first match). Report it; never
+        # edit outside the marker block.
+        $shadow = Get-ShadowingState
+        if ($shadow) {
+            $lines += ''
+            $lines += '  WARNING: another tool wrote a github.com entry above the'
+            $lines += '  goto-github block, so it takes precedence:'
+            $lines += "    $shadow"
+            $lines += '  The goto-github entry below is currently INERT.'
         }
     } else {
         $lines += '  Current IP: (none)'
