@@ -60,6 +60,8 @@
 - 失误：把 `fetch.sh` 改成 `source lib/` 会改变分发形态（单文件 → 多文件）→ 规则：此类架构变更先与用户确认方向（拉取 vs 扫描、单文件 vs 多文件），再动手
 - 失误：`parity-check.sh` 只校验根 `goto-github.ps1`，漏掉 `ps1/lib/00-constants.ps1`；后者一旦漂移，两套 PS 实现写出互不可见的 hosts 块而 CI 无感 → 规则：parity 覆盖所有已存在的 PS 常量文件；文件缺失必须显式 `SKIP:` 并说明未校验，绝不静默当作已校验
 - 失误：bash 拼 JSON 时把 Windows 路径（`C:\Users\...`）原样插入 `"backup":"$path"`，反斜杠在 JSON 字符串里是转义字符，整行变成非法 JSON，PowerShell `ConvertFrom-Json` 报 `Unrecognized escape sequence` → 规则：bash 侧所有插入 JSON 字符串的变量必须过 `json_escape`（先转义 `\` 再转义 `"`）；双语言契约下这是硬要求——一侧不可解析即契约破裂
+- 失误：在 PowerShell 5.1 会话里调外部 exe 时传 glob（shellcheck lib/*.sh），PowerShell 不做通配符展开，把 lib/*.sh 当字面量传给程序，报 openBinaryFile: invalid argument；同一天连踩五次 → 规则：Windows 上调 shellcheck/find 等会自己做 glob 的工具，一律经 ash -c '...' 或写进 .sh 再执行，不要在 PowerShell 命令行直接展开
+- 失误：& pwsh -Command "… $script:VAR …" 传脚本，外层 5.1 会话先把 $script: 展开成空；改用"写临时 .ps1 再 -File" 后，在 PowerShell 字符串里嵌套反引号与双引号生成该临时脚本，又连踩两次 ParserError → 规则：生成 PowerShell 脚本文件时，动态部分用 [char]96 表示反引号、用单引号字符串包住不含单引号的片段，避开嵌套转义；宁可多写几行拼接，不要在一行里叠三层引号
 - 失误：`extract_ps_marker` 内 `grep | head -1 | sed` 在 grep 无匹配时返回非 0，`set -o errexit -o pipefail` 在命令替换处直接中止，`die()` 不被调用 → 症状是 exit=1 但 stderr 空（CI 失败无诊断）→ 规则：提取函数末尾 `return 0`，调用处显式检查空值并分别报"未声明"与"值漂移"
 - 失误：双引号正则里写 `"\$?script:$var"`，shellcheck 0.11 报 SC1087（把 `$?script` 当数组展开）→ 规则：正则用拼接构造，`\$?script:` 留在单引号字面量里；`sed` 里的 `\$` 同样转义
 - 失误：bash 测试 harness 用 `out=$(cmd); rc=$?` 但外层 `set -e`，命令替换失败即中止外层，后续 echo 全不执行——误判成"被测脚本静默失败"→ 规则：捕获退出码必须 `set +e` 包裹；heredoc 用 `<<'EOF'` 引号形式，否则 `$script:` 被 shell 展开成 `:`，测出的内容根本不是想要的
