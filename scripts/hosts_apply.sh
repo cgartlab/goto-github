@@ -39,16 +39,10 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+# The skill layer's own constants — deliberately NOT lib/00-constants.sh, which
+# belongs to the pull-based CLI implementation.
 # shellcheck source=/dev/null
-. "$REPO_ROOT/lib/00-constants.sh"
-# shellcheck source=/dev/null
-. "$REPO_ROOT/lib/01-utils.sh"
-# shellcheck source=/dev/null
-. "$REPO_ROOT/lib/03-validate.sh"
-# shellcheck source=/dev/null
-. "$REPO_ROOT/lib/04-apply.sh"
+. "$SCRIPT_DIR/lib/constants.sh"
 
 HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 PROBE_REPO="${PROBE_REPO:-cgartlab/goto-github}"
@@ -99,6 +93,82 @@ json_escape() {
     s="${s//$'\r'/\\r}"
     s="${s//$'\t'/\\t}"
     printf '%s' "$s"
+}
+
+# ── Backup + write (local implementations; the CLI's lib/ is not sourced) ────
+# Backup before every write; prune to KEEP_BACKUPS newest.
+backup_hosts() {
+    local backup
+    backup="${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
+    if ! cp -p "$HOSTS_FILE" "$backup" 2>/dev/null && ! cp "$HOSTS_FILE" "$backup" 2>/dev/null; then
+        add_warning "backup failed; aborting without touching hosts"
+        return 1
+    fi
+    # Prune older backups (ls -1t sorts by mtime; keep newest KEEP_BACKUPS)
+    # shellcheck disable=SC2012
+    ls -1t "${HOSTS_FILE}.goto-github.bak."* 2>/dev/null | tail -n +"$((KEEP_BACKUPS + 1))" \
+        | while IFS= read -r old; do rm -f "$old"; done
+    printf '%s\n' "$backup"
+}
+
+# Strip any existing block, append the new one. Atomic via temp + mv.
+# Preserves permissions (macOS stat -f %Lp, GNU stat -c %a).
+write_hosts_block() {
+    local ip="$1"
+    local tmp_file perms
+    tmp_file=$(mktemp "${HOSTS_FILE}.XXXXXXXX") || {
+        add_warning "failed to create temp file; hosts unchanged"
+        return 1
+    }
+
+    # Remove any previous block (idempotency), keep every other line
+    sed "/^${MARKER_START}/,/^${MARKER_END}$/d" "$HOSTS_FILE" > "$tmp_file"
+
+    {
+        printf '\n%s\n' "$MARKER_START"
+        printf '%s\n' "# Managed by goto-github -- do not edit manually"
+        printf '%s\n' "# Updated at $(date '+%Y-%m-%d %H:%M:%S')"
+        printf '%s\n' "# Best IP: $ip"
+        local d
+        for d in $CORE_DOMAINS; do
+            printf '%s %s\n' "$ip" "$d"
+        done
+        printf '%s\n' "$MARKER_END"
+    } >> "$tmp_file"
+
+    if is_macos; then
+        perms=$(stat -f %Lp "$HOSTS_FILE" 2>/dev/null || true)
+    else
+        perms=$(stat -c %a "$HOSTS_FILE" 2>/dev/null || true)
+    fi
+    if [ -n "$perms" ]; then
+        chmod "$perms" "$tmp_file" 2>/dev/null || chmod 644 "$tmp_file" 2>/dev/null || true
+    else
+        chmod 644 "$tmp_file" 2>/dev/null || true
+    fi
+    chown 0:0 "$tmp_file" 2>/dev/null || true
+
+    if ! mv -f "$tmp_file" "$HOSTS_FILE"; then
+        rm -f "$tmp_file"
+        add_warning "failed to replace $HOSTS_FILE; hosts unchanged (backup kept)"
+        return 1
+    fi
+    return 0
+}
+
+is_macos() { [ "$(uname)" = "Darwin" ]; }
+
+flush_dns_cache() {
+    if is_macos; then
+        killall -HUP mDNSResponder 2>/dev/null || true
+        dscacheutil -flushcache 2>/dev/null || true
+    elif [ "$(uname)" = "Linux" ]; then
+        resolvectl flush-caches 2>/dev/null || true
+        systemctl restart systemd-resolved 2>/dev/null || true
+    elif [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; then
+        ipconfig //flushdns 2>/dev/null || true
+    fi
+    return 0
 }
 
 # ── Privilege ────────────────────────────────────────────────────────────────
@@ -307,28 +377,7 @@ fi
 echo "  selected IP: $ip (strategy: $used_strategy)" >&2
 
 # ── Build the block and write ────────────────────────────────────────────────
-# lib/04-apply.sh::apply_hosts already implements the safety chain:
-# backup -> prune -> atomic temp+rename -> permission preservation.
-# We build the marker block here because we have a single verified IP rather
-# than a raw community hosts list.
-build_block_for_ip() {
-    local ip="$1"
-    local timestamp
-    timestamp=$(date +%Y-%m-%d)
-    echo "$MARKER_START"
-    echo "# Managed by goto-github -- do not edit manually"
-    echo "# Updated at $timestamp"
-    echo "# Best IP: $ip"
-    local d
-    for d in $CORE_DOMAINS; do
-        echo "$ip $d"
-    done
-    echo "$MARKER_END"
-}
-
-block=$(build_block_for_ip "$ip")
-if ! apply_hosts "$block" >/dev/null 2>&1; then
-    add_warning "failed to write hosts file"
+backup_result=$(backup_hosts) || {
     warn_json="["
     first=1
     for w in "${warnings[@]}"; do
@@ -342,22 +391,29 @@ if ! apply_hosts "$block" >/dev/null 2>&1; then
 EOF
 )"
     exit 1
+}
+
+if ! write_hosts_block "$ip"; then
+    warn_json="["
+    first=1
+    for w in "${warnings[@]}"; do
+        [ $first -eq 0 ] && warn_json+=","
+        warn_json+="\"$(json_escape "$w")\""
+        first=0
+    done
+    warn_json+="]"
+    printf '%s\n' "$(cat <<EOF
+{"applied":false,"strategy":$used_strategy,"ip":"$ip","entries_written":0,"backup":"$(json_escape "$backup_result")","shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":false,"warnings":$warn_json}
+EOF
+)"
+    exit 1
 fi
 
-# The backup path apply_hosts created (newest matching file).
-# ls may not be available or may not glob Windows paths under Git Bash; fall
-# back to a find-based scan. If neither works, report null honestly rather
-# than claiming a backup that cannot be located.
-backup_path=$(ls -1t "${HOSTS_FILE}.goto-github.bak."* 2>/dev/null | head -1 || true)
-if [ -z "$backup_path" ] && command -v find >/dev/null 2>&1; then
-    backup_path=$(find "$(dirname "$HOSTS_FILE")" -maxdepth 1 -name "$(basename "$HOSTS_FILE").goto-github.bak.*" -type f 2>/dev/null | head -1 || true)
-fi
-if [ -n "$backup_path" ]; then
-    backup_json="\"$(json_escape "$backup_path")\""
-else
-    backup_json="null"
-    add_warning "backup was created but its path could not be determined"
-fi
+backup_path="$backup_result"
+# Escape for JSON: Windows paths carry backslashes, which are escape
+# characters in JSON strings. Unescaped they make the whole line unparseable
+# (ConvertFrom-Json: "Unrecognized escape sequence").
+backup_path_json="$(json_escape "$backup_path")"
 
 # Count entries actually written inside the marker block
 entries=$(sed -n "/^${MARKER_START}/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
@@ -368,7 +424,7 @@ check_shadowing_detail || true
 
 # ── DNS flush ────────────────────────────────────────────────────────────────
 dns_flushed="true"
-if ! flush_dns >/dev/null 2>&1; then
+if ! flush_dns_cache >/dev/null 2>&1; then
     dns_flushed="false"
     add_warning "DNS cache flush failed; hosts is written but cached entries may persist"
 fi
@@ -383,6 +439,6 @@ done
 warn_json+="]"
 
 printf '%s\n' "$(cat <<EOF
-{"applied":true,"strategy":$used_strategy,"ip":"$ip","entries_written":$entries,"backup":"$backup_path","shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":$dns_flushed,"warnings":$warn_json}
+{"applied":true,"strategy":$used_strategy,"ip":"$ip","entries_written":$entries,"backup":"$backup_path_json","shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":$dns_flushed,"warnings":$warn_json}
 EOF
 )"

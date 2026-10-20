@@ -34,14 +34,10 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+# The skill layer's own constants — deliberately NOT lib/00-constants.sh, which
+# belongs to the pull-based CLI implementation.
 # shellcheck source=/dev/null
-. "$REPO_ROOT/lib/00-constants.sh"
-
-ATTEMPTS=10
-CONNECT_TIMEOUT=5
-PROBE_REPO="${PROBE_REPO:-cgartlab/goto-github}"
+. "$SCRIPT_DIR/lib/constants.sh"
 
 show_help() {
     cat <<'EOF'
