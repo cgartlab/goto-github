@@ -91,6 +91,9 @@ json_escape() {
 GIT_OK=85
 API_OK=85
 WEB_OK=60
+# Minimum improvement (percentage points) that counts as a real gain over the
+# baseline. Below this the difference is sampling noise, not a repair effect.
+IMPROVE_MARGIN=10
 
 # ── Endpoints (same order/shape as connectivity_probe.sh) ────────────────────
 sample_endpoint() {
@@ -183,9 +186,15 @@ else
         base_api=$(grep -o '"key":"api"[^}]*"rate":[0-9]*' "$BASELINE" | grep -o '"rate":[0-9]*' | tail -1 | cut -d: -f2 || true)
 
         improved=0
+        # Noise floor: a 1-point wobble is not an improvement. The network is
+        # time-varying enough that 99% -> 100% happens by chance; counting that
+        # as "the repair helped" is exactly the false positive this baseline
+        # comparison exists to prevent.
         for pair in "web:$base_web:$web_rate" "git:$base_git:$git_rate" "api:$base_api:$api_rate"; do
             rest="${pair#*:}"; b="${rest%%:*}"; n="${rest##*:}"
-            if [ -n "$b" ] && [ "$n" -gt "$b" ]; then improved=$((improved + 1)); fi
+            if [ -n "$b" ] && [ $((n - b)) -ge "$IMPROVE_MARGIN" ]; then
+                improved=$((improved + 1))
+            fi
         done
 
         if [ "$web_rate" -ge "$WEB_OK" ] && [ "$improved" -gt 0 ] \

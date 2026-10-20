@@ -4,7 +4,7 @@
 # gating; warnings (e.g. unused variables, quoting) are.
 lint:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found. Install: brew install shellcheck (macOS) or apt install shellcheck (Linux)"; exit 1; }
-	@shellcheck --severity=warning fetch.sh install.sh lib/*.sh shared/*.sh tests/lib/*.sh tests/test-*.sh scripts/*.sh scripts/lib/*.sh
+	@shellcheck --severity=warning fetch.sh install.sh lib/*.sh shared/*.sh tests/lib/*.sh tests/test-*.sh scripts/*.sh scripts/lib/*.sh evals/*.sh
 	@echo "Lint passed."
 
 # Assert bash and PowerShell agree on shared data constants (markers, sources).

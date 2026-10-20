@@ -1,0 +1,71 @@
+{
+  "skill_name": "goto-github",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "GitHub 打不开了，帮我看看是不是网络问题",
+      "expected_output": "Skill 先跑 env_detection（Phase 0），再跑 connectivity_probe 对 5 个端点各采样 10 次（Phase 1），最后按阈值分级。报告必须分端点列出成功率，不得合并成单一的\"能用/不能用\"结论。若 git 与 api 端点成功率高而 web 低，结论是 hosts_needed 而非\"GitHub 挂了\"。",
+      "expectations": [
+        "调用了 env_detection 并读取 warnings[]",
+        "调用了 connectivity_probe 且默认 10 次采样",
+        "报告分 5 个端点分别给出成功率，没有合并成单一结论",
+        "判定使用了 references/judgment-criteria.md 的阈值（git/api 85%、web 60%）",
+        "探测绕过了代理（proxy_bypassed 为 true）"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "clone 一个仓库超时，但是网页还能打开",
+      "expected_output": "识别为 git smart-http 端点退化而 web 可用——与常见情况相反，说明干扰按路径而非按 IP。报告必须单独说 git 端点，并给出 web 与 git 的对比，不得因为 web 可用就判定 direct_ok。",
+      "expectations": [
+        "单独报告 git 端点的成功率",
+        "指出 web 与 git 的差异（按路径干扰），未合并结论",
+        "判定未因 web 可用而直接给出 direct_ok"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "帮我把 GitHub 加到 hosts 里",
+      "expected_output": "先完成 Phase 0/1/2 再写盘。写盘前确认已备份、检测遮蔽、确认有 root/管理员权限；不自动提权。写入后跑 hosts_status 复测，与 baseline 对比，未改善则如实报 not_fixed。",
+      "expectations": [
+        "写盘前跑过 env_detection 与 connectivity_probe",
+        "backup 字段非空（无备份不写盘）",
+        "shadowing.checked 为 true",
+        "非 root/管理员时报告需要执行的命令而非自动提权",
+        "写盘后跑 hosts_status 复测并给出 verdict"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "gh 命令报 401，是不是 GitHub 出问题了",
+      "expected_output": "识别为本地配置问题而非网络问题：GITHUB_TOKEN 环境变量失效会遮蔽 keyring 有效 token。报告必须把 gh_auth.state=env_var_shadowed 与网络连通性分开说，并指出 git 操作不受影响。",
+      "expectations": [
+        "env_detection 报出 env_var_shadowed",
+        "明确说明这不是网络问题",
+        "指出 git 操作走 credential.helper 不受影响",
+        "仍完成了连通性采样以证明网络本身的状态"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "我这台机器直连 GitHub 到底行不行",
+      "expected_output": "给出分端点成功率表 + 延迟分布（min/max/avg）+ 分级结论，并带上时间戳。不引用旧数据下结论，因为干扰是时变的（实测同端点两次采样可差 30 个百分点）。",
+      "expectations": [
+        "输出 5 个端点的成功率与延迟分布",
+        "结论带时间戳",
+        "没有基于单次请求下结论",
+        "成功但慢（avg > 3s）与不可用被区分报告"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "已经写过 hosts 了，再跑一次会不会重复",
+      "expected_output": "幂等：重复运行 hosts_apply 不产生第二个标记块。skill 应能说明这一点，且若实际执行，写入后标记块数量仍为 1。",
+      "expectations": [
+        "说明幂等性保证",
+        "若实际执行，标记块数量仍为 1",
+        "标记区块外部内容未被改动"
+      ]
+    }
+  ]
+}

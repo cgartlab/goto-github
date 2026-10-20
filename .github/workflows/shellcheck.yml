@@ -73,6 +73,32 @@ jobs:
           fi
           echo "Skill scripts OK."
 
+      - name: Validate SKILL.md frontmatter
+        run: |
+          # The skill loader reads these keys; a typo silently breaks loading.
+          missing=0
+          for key in name description license compatibility metadata; do
+            if ! grep -q "^${key}:" SKILL.md; then
+              echo "SKILL.md: missing required frontmatter key '$key'"
+              missing=1
+            fi
+          done
+          # metadata must carry a version and a date
+          if ! grep -q '^  version:' SKILL.md; then
+            echo "SKILL.md: metadata.version missing"
+            missing=1
+          fi
+          # The description must mention a trigger phrase, or the skill never fires
+          if ! grep -q 'Use this skill whenever' SKILL.md; then
+            echo "SKILL.md: description lacks a trigger clause"
+            missing=1
+          fi
+          [ "$missing" -ne 0 ] && exit 1
+          echo "SKILL.md frontmatter OK."
+
+      - name: Run skill smoke evals
+        run: bash evals/run_smoke.sh
+
   pwsh-lint:
     name: PowerShell lint (PSScriptAnalyzer)
     runs-on: ubuntu-latest

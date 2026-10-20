@@ -85,6 +85,9 @@ function Get-CurlPath {
 $GIT_OK = 85
 $API_OK = 85
 $WEB_OK = 60
+# Minimum improvement (percentage points) that counts as a real gain over the
+# baseline. Below this the difference is sampling noise, not a repair effect.
+$IMPROVE_MARGIN = 10
 
 # ── Endpoints (same order/shape as connectivity_probe.ps1) ───────────────────
 $endpoints = [ordered]@{
@@ -213,9 +216,15 @@ if (-not $installed) {
         $baseRates = @{}
         foreach ($e in $base.endpoints) { $baseRates[$e.key] = [int]$e.rate }
 
+        # Noise floor: a 1-point wobble is not an improvement. The network is
+        # time-varying enough that 99% -> 100% happens by chance; counting that
+        # as "the repair helped" is exactly the false positive this baseline
+        # comparison exists to prevent.
         $improved = 0
         foreach ($k in 'web', 'git', 'api') {
-            if ($baseRates.ContainsKey($k) -and $rates[$k] -gt $baseRates[$k]) { $improved++ }
+            if ($baseRates.ContainsKey($k) -and ($rates[$k] - $baseRates[$k]) -ge $IMPROVE_MARGIN) {
+                $improved++
+            }
         }
 
         if ($webRate -ge $WEB_OK -and $improved -gt 0 -and $gitRate -ge $GIT_OK -and $apiRate -ge $API_OK) {
