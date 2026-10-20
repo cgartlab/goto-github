@@ -1,58 +1,74 @@
 # GoToGitHub
 
-[![Lint](https://github.com/cgartlab/goto-github/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/cgartlab/goto-github/actions)
+[![Lint](https://github.com/cgartlab/goto-github/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/cgartlab/goto-github/actions/workflows/shellcheck.yml)
 [![Argus-Flash Review](https://github.com/cgartlab/goto-github/actions/workflows/argus-review.yml/badge.svg)](https://github.com/cgartlab/goto-github/actions/workflows/argus-review.yml)
 [![MIT License](https://img.shields.io/github/license/cgartlab/goto-github?style=flat-square)](https://github.com/cgartlab/goto-github/blob/main/LICENSE)
 
-GitHub 访问加速工具。实时从社区维护的 hosts 源获取 GitHub 域名映射，写入本地 `/etc/hosts`，无需本地扫描。
+GitHub 访问诊断与加速。先探测本机到 GitHub 各端点的连通性，按证据分级判定，必要时写入 hosts 修复并验证。
 
-## 一键安装
+**两种用法**：作为 **Agent Skill** 让 AI 自动诊断修复，或作为 **CLI 工具**手动使用。两种用法共享同一套引擎与安全边界。
 
-**macOS / Linux (Git Bash):**
+---
 
-```bash
-# 方式一：原始链接（推荐，如果可访问）
-curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash
+## 作为 Skill 使用
 
-# 方式二：jsDelivr 镜像（国内推荐）
-curl -sfL https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/install.sh | bash
+仓库本身即 skill。经 magpie Library 安装后，对 Agent 说：
 
-# 方式三：ghproxy 镜像
-curl -sfL https://ghproxy.com/https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh | bash
+- "GitHub 打不开 / 连不上 / 很慢"
+- "clone 失败 / push 失败"
+- "GitHub 现在能用吗 / 直连是否正常 / 要不要改 hosts"
+
+Skill 会依次执行：环境探测 → 5 端点统计采样 → 分级判定 → （需要时）写 hosts 修复 → 复测验证，最后给出分级报告。
+
+核心设计：**分级报告而非"能用/不能用"**。GitHub 是多个独立端点，干扰按路径而非按 IP——实测中同 IP 的 API 100% 而网页 30%。合并成一个结论会丢失真正有用的信息。
+
+```
+Phase 0  环境探测      hosts 条目 / 遮蔽 / 代理 / DNS / gh 鉴权
+Phase 1  连通性采样    5 端点 × N 次（默认 10），绕代理，000 不计成功
+Phase 2  判定          direct_ok / hosts_needed / partial / proxy_needed
+Phase 3  修复          优先级 IP → 社区源 → CIDR 扫描；备份→标记块→遮蔽检测→刷 DNS
+Phase 4  报告          复测对比，未改善则如实报 not_fixed
 ```
 
-**Windows PowerShell:**
+Skill 文档：`SKILL.md`（路由与流程）、`references/`（判定阈值、JSON 契约、安全边界、环境要求）。
 
-```powershell
-# 方式一：bootstrap.ps1 一键安装（推荐）
-irm https://raw.githubusercontent.com/cgartlab/goto-github/main/bootstrap.ps1 | iex
+---
 
-# 方式二：jsDelivr 镜像（国内推荐）
-irm https://cdn.jsdelivr.net/gh/cgartlab/goto-github@main/bootstrap.ps1 | iex
+## 作为 CLI 使用
 
-# 方式三：-OutFile fallback（备用）
-irm https://raw.githubusercontent.com/cgartlab/goto-github/main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
-```
+### 一键安装
 
-**说明**：安装脚本会自动尝试多个镜像源，如果某个源失败会自动切换到下一个。
+| 平台 | 命令 |
+|------|------|
+| macOS / Linux | `curl -sfL https://raw.githubusercontent.com/cgartlab/goto-github/main/install.sh \| bash` |
+| Windows PowerShell | `irm https://raw.githubusercontent.com/cgartlab/goto-github/main/bootstrap.ps1 \| iex` |
 
-## 一句话说明
+国内网络可用 jsDelivr 镜像：把 URL 里的 `raw.githubusercontent.com` 换成 `cdn.jsdelivr.net/gh/cgartlab/goto-github@main`。
 
-**Bash (macOS / Linux / Git Bash):**
-```bash
-sudo ./fetch.sh              # 拉取 → 写入 hosts → 刷新 DNS
-./fetch.sh --status         # 查看当前状态（无需 sudo）
-./fetch.sh --probe          # 探测可用 IP（诊断用，无需 sudo）
-sudo ./fetch.sh --restore   # 移除 goto-github 条目
-```
+### Bash (macOS / Linux / Git Bash)
 
-**PowerShell (Windows):**
-```powershell
-.\goto-github.ps1           # 交互菜单（需管理员权限修改 hosts）
-.\goto-github.ps1 --pwsh status  # JSON 状态（脚本用）
-```
+| 命令 | 功能 | 需 sudo |
+|------|------|---------|
+| `sudo ./fetch.sh` | 拉取 → 验证 → 写入 hosts → DNS 刷新 | ✅ |
+| `./fetch.sh --status` | 显示当前 IP 和连通性 | ❌ |
+| `./fetch.sh --probe` | 探测可用的 github.com IP（诊断用，不写 hosts） | ❌ |
+| `sudo ./fetch.sh --restore` | 移除 goto-github 条目 | ✅ |
+| `./fetch.sh --help` | 显示帮助 | ❌ |
 
-## 手动使用
+### PowerShell (Windows)
+
+| 命令 | 功能 | 需管理员 |
+|------|------|---------|
+| `.\goto-github.ps1` | 交互菜单 | 修改 hosts 时需要 |
+| `.\goto-github.ps1 --pwsh status` | JSON 状态（脚本用） | ❌ |
+| `.\goto-github.ps1 --pwsh auto` | 一键加速 | ✅ |
+| `.\goto-github.ps1 --pwsh restore` | 恢复 hosts | ✅ |
+
+> **两套 PowerShell 实现并存且互斥**：根 `goto-github.ps1`（拉取式，`install.ps1` 实际发布）与 `ps1/`（扫描式，实验性，**不**默认下载）。二者标记相同、写同一个 hosts，同装会互相覆盖；CLI 接口也不兼容（`--pwsh auto|status|restore|source` vs `run|install|status|help|uninstall`）。
+
+---
+
+## 工作原理
 
 ```
 数据源（jsDelivr CDN 加速）→ fetch.sh → 内容验证 → 写入 /etc/hosts → DNS 刷新
@@ -62,63 +78,71 @@ sudo ./fetch.sh --restore   # 移除 goto-github 条目
 2. **验证** — 检查 IP 条目数量（≥10）和 github.com 域名存在性
 3. **写入** — 在 `/etc/hosts` 中以标记区块隔离写入，不影响其他条目
 4. **刷新** — macOS / Linux 刷新本地 DNS 缓存
-5. **探测** — 当所有源的核心 IP 均不可达时，自动探测可用的 GitHub 边缘 IP（见下节）
+5. **探测** — 当所有源的核心 IP 均不可达时，自动探测可用的 GitHub 边缘 IP
 
-## 数据源
+### 数据源
 
 | 源 | 说明 |
 |----|------|
 | `cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts` | 主源（CDN 加速） |
 | `raw.hellogithub.com/hosts` | 备用源（回退使用） |
 
-## IP 探测（兜底）
+### IP 探测（兜底）
 
-GitHub 按 IP 精确干扰时，社区源列出的 IP 可能恰好被阻断。此时 fetch.sh 不会直接报错，而是主动探测：
+GitHub 按 IP 精确干扰时，社区源列出的 IP 可能恰好被阻断。此时不会直接报错，而是主动探测：
 
 - **候选池** — 数据源中出现的唯一 IP，各扩展 ±7 的 /24 窗口（上限 300），去重后取前 50 个
-- **探测目标** — `github/gitignore` 的 git smart-http 端点，而非 `github.com` 首页。部分边缘 IP 能返回首页但不通 git 流量，只测首页会选出“假阳性”IP
+- **探测目标** — `github/gitignore` 的 git smart-http 端点，而非 `github.com` 首页。部分边缘 IP 能返回首页但不通 git 流量，只测首页会选出"假阳性"IP
 - **并发测试** — 返回首个 HTTP 2xx 的 IP，写入 hosts 启用探测模式
 
 单独诊断：`./fetch.sh --probe`（只探测不写 hosts）。
 
-⚠️ 探测到的 IP 同样是动态的，后续可能失效。另外，如果 `/etc/hosts` 在 goto-github 标记**之前**存在其他工具写入的 github.com 条目，它会优先生效并遮蔽本工具的映射 —— fetch.sh 会在应用后警告此情况，需手动处理。
+⚠️ 探测到的 IP 同样是动态的，后续可能失效。另外，如果 `/etc/hosts` 在 goto-github 标记**之前**存在其他工具写入的 github.com 条目，它会优先生效并遮蔽本工具的映射 —— 脚本会在应用后警告此情况，需手动处理。
+
+---
+
+## 安全边界
+
+- **只改标记区块内部**：`# >>> goto-github >>>` / `# <<< goto-github <<<` 之外一律不碰
+- **先备份再写**：备份失败即中止，hosts 保持原样
+- **遮蔽检测**：标记上方有其他工具的 github.com 条目时警告（不修改区块外部）
+- **幂等**：重复运行不产生重复标记块
+- **不自动提权**：需要 root/管理员时报告命令，不自动 `sudo` / 不弹 UAC
+
+---
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `HOSTS_FILE` | `/etc/hosts` | 指定 hosts 文件路径 |
+| `PROBE_REPO` | `cgartlab/goto-github` | git/下载探测端点用的仓库 |
+| `GOTO_GITHUB_TEST_PRIVILEGED` | — | 置 `1` 跳过权限检查（仅测试，不授予真实权限） |
+| `GOTO_GITHUB_FORCE_IP` | — | 绕过探测直接指定 IP（仅测试） |
 
 ## 依赖
 
 | 平台 | 依赖 |
 |------|------|
 | macOS / Linux | Bash 3.2+、curl |
-| Windows | PowerShell 5.1+（原生，无需 Git Bash） |
+| Windows | PowerShell 5.1+（拉取式）或 PowerShell 7+（扫描式 `ps1/`）、curl.exe |
 
-所有平台均需要管理员权限（写入 hosts）。
+所有平台修改 hosts 均需要管理员权限。
 
 ## 平台
 
-- **macOS / Linux**: 使用 Bash 脚本
-- **Windows**: 使用 PowerShell 原生实现
+- **macOS / Linux**: Bash 脚本
+- **Windows**: PowerShell 原生实现（无需 Git Bash）
+- **WSL**: 不支持（hosts 行为与 Windows 不同）
 
-## Windows 说明
+## 开发
 
-Windows 用户使用 PowerShell 原生实现，无需 Git Bash：
-
-```powershell
-# 安装
-irm https://raw.githubusercontent.com/cgartlab/goto-github/main/bootstrap.ps1 | iex
-
-# 使用
-.\goto-github.ps1           # 交互菜单
-.\goto-github.ps1 --pwsh status  # JSON 状态（脚本用）
-.\goto-github.ps1 --pwsh auto    # 一键加速
-.\goto-github.ps1 --pwsh restore # 恢复 hosts
+```bash
+make lint      # shellcheck --severity=warning（0 warnings）
+make test      # bash 单元测试（mock curl，无需网络）
+make parity    # bash ↔ PowerShell 常量一致性
+make ps-test   # ps1/ 单元测试（仅 Windows，需 pwsh 7）
 ```
-
-**注意**：修改 hosts 文件需要管理员权限，脚本会自动请求提升。
 
 ## 许可证
 

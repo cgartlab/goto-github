@@ -57,7 +57,7 @@ metadata:
 
 ## 脚本使用约定
 
-`scripts/` 下是本 skill 的黑盒采集/执行脚本（bash `.sh` 与 PowerShell `.ps1` 两套，输出同形 JSON）。**先 `--help` 再调用**；除非 `--help` 不够用，不要读源码——它们存在是为了被调用，不是为了被读进上下文。
+`scripts/` 下是本 skill 的黑盒采集/执行脚本（bash `.sh` 与 PowerShell `.ps1` 两套，输出同形 JSON）。**先 `--help`（PowerShell 侧为 `-Help`）再调用**；除非 `--help` 不够用，不要读源码——它们存在是为了被调用，不是为了被读进上下文。
 
 采集脚本只做只读探测，绝不自己写 hosts。执行脚本（`hosts_apply`）会改系统文件，调用前必须确认 Phase 2 判定为"需要修复"，且环境探测显示有权限（bash: root；Windows: 管理员）。字段语义见 `references/probe-recipes.md`，不要凭字段名猜。
 

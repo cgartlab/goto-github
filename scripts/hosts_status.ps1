@@ -25,10 +25,37 @@
 param(
     [int]$Attempts = 10,
     [int]$Timeout = 5,
-    [string]$Baseline
+    [string]$Baseline,
+    [switch]$Help
 )
 
 $ErrorActionPreference = 'Stop'
+
+$showHelp = {
+    Write-Output @'
+Usage: hosts_status.ps1 [-Attempts N] [-Timeout SEC] [-Baseline FILE] [-Help]
+
+Phase 4 verification for the goto-github skill. Read-only.
+
+Re-samples the same 5 endpoints as connectivity_probe.ps1 and emits a verdict:
+  fixed          web crossed the threshold and git/api did not regress
+  partial        at least one endpoint improved, threshold not reached
+  not_fixed      no endpoint improved
+  not_installed  no goto-github marker block present
+
+Options:
+  -Attempts N   samples per endpoint (default 10; must match the baseline)
+  -Timeout SEC  connect timeout in seconds (default 5)
+  -Baseline F   previous connectivity_probe JSON output; the verdict is
+                computed against it (improvement, not just thresholds)
+
+Environment:
+  HOSTS_FILE  hosts file path (default: %SystemRoot%\System32\drivers\etc\hosts)
+  PROBE_REPO  owner/repo for git/download endpoints
+'@
+}
+
+if ($Help) { & $showHelp; exit 0 }
 
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'lib\constants.ps1')

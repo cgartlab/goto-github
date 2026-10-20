@@ -57,6 +57,10 @@ function Expand-CidrToIPs {
     return $allIPs.ToArray()
 }
 
+# Probe target lives in 00-constants.ps1 ($script:PROBE_TARGET) — it is a
+# constant, so it must be declared in exactly one place. Duplicating it here
+# would silently shadow the constant and let the two drift apart.
+
 # ---------------------------------------------------------------------------
 # Test-Ip: single-IP validation via curl.exe --resolve
 # ---------------------------------------------------------------------------
@@ -73,12 +77,16 @@ function Test-Ip {
     if (-not $curlPath) { return $null }
 
     try {
+        # --resolve forces the IP while SNI still routes to github.com, so the
+        # IP must actually serve that Host. The git endpoint is the only
+        # target that proves git traffic works — the homepage can lie.
         $out = & $curlPath --resolve "github.com:443:$IP" `
             -s -o NUL `
             -w "%{http_code},%{time_total},%{size_download}" `
             --connect-timeout $script:CONNECT_TIMEOUT `
             --max-time $script:MAX_TIME `
-            "https://github.com/" 2>$null
+            -H 'Accept: application/x-git-upload-pack-advertisement' `
+            $script:PROBE_TARGET 2>$null
 
         if ($LASTEXITCODE -ne 0) { return $null }
 
@@ -119,18 +127,22 @@ function Test-PriorityIp {
     $localMaxTime = $script:MAX_TIME
     $localMinSize = $script:MIN_CONTENT_SIZE
     $localBatch = $script:CONCURRENT_BATCH
+    $localTarget = $script:PROBE_TARGET
 
     # ForEach-Object -Parallel has no -AsArray parameter; @() stops a single
     # result from unwrapping to a bare scalar.
     $results = @($localIps | ForEach-Object -Parallel {
         $ip = $_
 
+        # Probe the git smart-http endpoint, not the homepage: an IP can serve
+        # the homepage while timing out on git traffic.
         $result = & $using:localCurl --resolve "github.com:443:$ip" `
             -s -o NUL `
             -w "%{http_code},%{time_total},%{size_download}" `
             --connect-timeout $using:localTimeout `
             --max-time $using:localMaxTime `
-            "https://github.com/" 2>$null
+            -H 'Accept: application/x-git-upload-pack-advertisement' `
+            $using:localTarget 2>$null
 
         if ($LASTEXITCODE -ne 0) { return }
 
@@ -172,6 +184,7 @@ function Test-CidrRange {
     $localMinSize = $script:MIN_CONTENT_SIZE
     $localBatch = $script:CONCURRENT_BATCH
     $localRanges = $script:CIDR_RANGES
+    $localTarget = $script:PROBE_TARGET
 
     $allIPs = Expand-CidrToIPs -Cidrs $localRanges
     if ($allIPs.Count -eq 0) { return $null }
@@ -186,12 +199,15 @@ function Test-CidrRange {
         $results = @($batch | ForEach-Object -Parallel {
             $ip = $_
 
+            # Probe the git smart-http endpoint, not the homepage: an IP can
+            # serve the homepage while timing out on git traffic.
             $result = & $using:localCurl --resolve "github.com:443:$ip" `
                 -s -o NUL `
                 -w "%{http_code},%{time_total},%{size_download}" `
                 --connect-timeout $using:localTimeout `
                 --max-time $using:localMaxTime `
-                "https://github.com/" 2>$null
+                -H 'Accept: application/x-git-upload-pack-advertisement' `
+                $using:localTarget 2>$null
 
             if ($LASTEXITCODE -ne 0) { return }
 

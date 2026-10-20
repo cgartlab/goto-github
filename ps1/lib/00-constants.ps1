@@ -79,3 +79,11 @@ $script:CONNECT_TIMEOUT = 3
 $script:MAX_TIME = 6
 $script:MIN_CONTENT_SIZE = 100000
 $script:MIN_CACHE_TTL = 300
+
+# Probe target: git smart-http endpoint, NOT the github.com homepage.
+# Some edge IPs serve the homepage but time out on git traffic, so probing the
+# homepage selects "false positive" IPs that break clone/fetch/push.
+$script:PROBE_TARGET = 'https://github.com/github/gitignore.git/info/refs?service=git-upload-pack'
+
+# Backup rotation: keep at most this many hosts backups
+$script:KEEP_BACKUPS = 5

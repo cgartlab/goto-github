@@ -27,10 +27,35 @@
 [CmdletBinding()]
 param(
     [ValidateSet('priority', 'community', 'cidr', 'auto')]
-    [string]$Strategy = 'auto'
+    [string]$Strategy = 'auto',
+    [switch]$Help
 )
 
 $ErrorActionPreference = 'Stop'
+
+$showHelp = {
+    Write-Output @'
+Usage: hosts_apply.ps1 [-Strategy priority|community|cidr|auto] [-Help]
+
+Phase 3 hosts repair for the goto-github skill. WRITES the hosts file.
+
+Strategy chain (auto = try in order, stop at first success):
+  priority    known-stable IPs only (seconds)
+  community   pull a verified hosts list from community sources
+  cidr        expand CIDR ranges and probe concurrently (minutes)
+
+Safety: backs up before writing, checks for shadowing, only edits inside
+the marker block, idempotent. Does NOT auto-elevate.
+
+Requires administrator privileges.
+
+Environment:
+  HOSTS_FILE  hosts file path (default: %SystemRoot%\System32\drivers\etc\hosts)
+  PROBE_REPO  owner/repo for the git probe endpoint
+'@
+}
+
+if ($Help) { & $showHelp; exit 0 }
 
 # ── Resolve repo root and load the skill's own constants ─────────────────────
 # scripts/lib/constants.ps1 is the skill layer's single source of truth. It is
@@ -341,8 +366,9 @@ function Invoke-DnsFlush {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 if (-not (Test-CanWriteHosts)) {
-    # Report the command; never auto-elevate.
-    Write-Error "writing the hosts file requires administrator privileges. Run PowerShell as Administrator and retry (this script does not auto-elevate)."
+    # Report the command; never auto-elevate. stderr, so stdout stays a clean
+    # single JSON line.
+    [Console]::Error.WriteLine("ERROR: writing the hosts file requires administrator privileges. Run PowerShell as Administrator and retry (this script does not auto-elevate).")
     Emit-Result -Applied $false -UsedStrategy $null -Ip $null -Entries 0 -Backup $null `
         -ShadowChecked $false -ShadowFound $false -ShadowDetail $null -DnsFlushed $false
     exit 1

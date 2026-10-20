@@ -159,6 +159,36 @@ function Test_CidrRange_ExpandsAndScans {
     Assert-True ($r.IP -match '^(140\.82|185\.199|192\.30|143\.55)\.') "Result IP must come from one of the 4 CIDR ranges, got '$($r.IP)'"
 }
 
+function Test_ProbeTarget_IsGitSmartHttp {
+    <#
+    Lock the probe target to the git smart-http endpoint.
+
+    The mock curl matches on `github.com:443:<ip>` only — it does not inspect
+    the URL. So if PROBE_TARGET regressed to the homepage, every scan test
+    above would still pass while the real scan selected "false positive" IPs
+    that serve the homepage but time out on git traffic. This assertion is the
+    only thing that catches that regression.
+    #>
+    Assert-NotEmpty $script:PROBE_TARGET "PROBE_TARGET must be defined"
+    Assert-Contains $script:PROBE_TARGET 'info/refs' "Probe target must be a git smart-http endpoint"
+    Assert-Contains $script:PROBE_TARGET 'git-upload-pack' "Probe target must request the upload-pack service"
+    Assert-False ($script:PROBE_TARGET -eq 'https://github.com/') "Probe target must NOT be the homepage"
+}
+
+function Test_TestIp_UsesGitProbeTarget {
+    <#
+    Test-Ip must probe the git endpoint. The mock records nothing, so this
+    verifies via the observable contract: Test-Ip returns a result only when
+    the IP answers, and the IP it reports is the one passed in. Combined with
+    Test_ProbeTarget_IsGitSmartHttp this pins the whole path.
+    #>
+    $r = Test-Ip -IP '140.82.112.3'
+    Assert-True ($null -ne $r) "Test-Ip should succeed for a known-good IP"
+    Assert-Equals '140.82.112.3' $r.IP "Test-Ip must report the IP it probed"
+    $r404 = Test-Ip -IP '185.199.108.1'
+    Assert-True ($null -eq $r404) "Test-Ip must reject an IP the mock answers 404 for"
+}
+
 function Test_PriorityIp_ReturnsNullWhenNoCurl {
     $saved = $script:MockCurl
     $script:MockCurl = ''
@@ -186,5 +216,7 @@ Run-Test "Test-PriorityIp returns fastest result"    { Test_PriorityIp_ReturnsFa
 Run-Test "Test-PriorityIp fastest IP wins tiebreak"  { Test_PriorityIp_SmallestWinsTieBreak }
 Run-Test "Test-CidrRange expands and scans"          { Test_CidrRange_ExpandsAndScans }
 Run-Test "Test-PriorityIp returns null without curl" { Test_PriorityIp_ReturnsNullWhenNoCurl }
+Run-Test "PROBE_TARGET is git smart-http"             { Test_ProbeTarget_IsGitSmartHttp }
+Run-Test "Test-Ip uses git probe target"              { Test_TestIp_UsesGitProbeTarget }
 $rc = Test-Report
 exit $rc

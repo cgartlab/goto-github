@@ -29,7 +29,10 @@ if ($needAdminCommands -contains $currentCommand -and $env:GOTO_GITHUB_ELEVATED 
         $argList = @('-NoProfile', '-File', $PSCommandPath, '-Elevated') + $args
         Write-Verbose "Re-launching with admin privileges..." -Verbose
         $proc = Start-Process pwsh -Verb RunAs -ArgumentList $argList -Wait -PassThru
-        exit $proc.ExitCode
+        # $proc is $null when the user dismisses the UAC prompt. Under
+        # Set-StrictMode -Version Latest, $proc.ExitCode then throws
+        # PropertyNotFound instead of exiting cleanly.
+        if ($proc) { exit $proc.ExitCode } else { exit 1 }
     }
 }
 

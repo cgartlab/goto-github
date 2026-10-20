@@ -15,9 +15,30 @@
     .\scripts\env_detection.ps1
 #>
 [CmdletBinding()]
-param()
+param(
+    [switch]$Help
+)
 
 $ErrorActionPreference = 'Stop'
+
+$showHelp = {
+    Write-Output @'
+Usage: env_detection.ps1 [-Help]
+
+Phase 0 environment probe for the goto-github skill. Read-only.
+
+Detects: shell, platform, curl availability, hosts marker block and
+shadowing, proxy state, DNS servers, DoH state, gh auth state, privilege
+level.
+
+Output: single-line JSON on stdout.
+
+Environment:
+  HOSTS_FILE  hosts file path (default: %SystemRoot%\System32\drivers\etc\hosts)
+'@
+}
+
+if ($Help) { & $showHelp; exit 0 }
 
 # ── Resolve repo root (scripts/ -> repo root) ────────────────────────────────
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -223,14 +244,14 @@ $dohState = $null
 if ($platform -eq 'Windows') {
     $dohExplicit = $false
     $dohAuto = $false
-    try {
-        $doh = Get-DnsClientDohServerAddress -ErrorAction SilentlyContinue
-        if ($doh | Where-Object { $_.DohClientConfig -ne 0 }) { $dohExplicit = $true }
-    } catch { }
-    try {
-        $reg = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name 'DohAutoUpgradeState' -ErrorAction SilentlyContinue
-        if ($reg.DohAutoUpgradeState -eq 1) { $dohAuto = $true }
-    } catch { }
+    # -ErrorAction SilentlyContinue is enough: the cmdlet simply does not exist
+    # on older Windows 10 builds, which is not an error condition worth
+    # catching. No try/catch here, so nothing can be silently swallowed.
+    $doh = Get-DnsClientDohServerAddress -ErrorAction SilentlyContinue
+    if ($doh | Where-Object { $_.DohClientConfig -ne 0 }) { $dohExplicit = $true }
+
+    $reg = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name 'DohAutoUpgradeState' -ErrorAction SilentlyContinue
+    if ($reg.DohAutoUpgradeState -eq 1) { $dohAuto = $true }
     if ($dohExplicit -or $dohAuto) {
         $dohState = @{ explicit = $dohExplicit; auto_upgrade = $dohAuto }
         Add-Warning 'DNS-over-HTTPS is enabled; apps that use DoH bypass the hosts file'

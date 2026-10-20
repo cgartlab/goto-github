@@ -32,13 +32,43 @@
 param(
     [int]$Attempts = 10,
     [int]$Timeout = 5,
-    [string]$Repo = 'cgartlab/goto-github'
+    [string]$Repo = 'cgartlab/goto-github',
+    [switch]$Help
 )
 
 $ErrorActionPreference = 'Stop'
 
+$showHelp = {
+    Write-Output @'
+Usage: connectivity_probe.ps1 [-Attempts N] [-Timeout SEC] [-Repo owner/repo] [-Help]
+
+Phase 1 connectivity sampling for the goto-github skill. Read-only.
+
+Samples 5 GitHub endpoints N times each and reports success rate plus
+latency distribution (min/max/avg). Always bypasses the proxy.
+
+Options:
+  -Attempts N   samples per endpoint (default 10; below 5 the verdict is
+                unstable and the report must say so)
+  -Timeout SEC  connect timeout in seconds (default 5)
+  -Repo         owner/repo for the git and download endpoints
+
+Output: single-line JSON on stdout.
+'@
+}
+
+if ($Help) { & $showHelp; exit 0 }
+
+# Warnings must go to stderr, NOT the warning stream: in a pipeline capture the
+# warning stream is forwarded to stdout, which would break the contract that
+# stdout carries exactly one JSON line.
+function Write-StderrWarning {
+    param([string]$Message)
+    [Console]::Error.WriteLine("WARNING: $Message")
+}
+
 if ($Attempts -lt 5) {
-    Write-Warning "--attempts $Attempts is below 5; the success rate is not statistically meaningful"
+    Write-StderrWarning "--attempts $Attempts is below 5; the success rate is not statistically meaningful"
 }
 
 # ── Endpoint table (order is fixed — see references/judgment-criteria.md) ────
@@ -68,7 +98,7 @@ function Invoke-EndpointSample {
 
     $curl = Get-CurlPath
     if (-not $curl) {
-        Write-Warning "curl.exe not found; cannot probe $Key"
+        Write-StderrWarning "curl.exe not found; cannot probe $Key"
         return @{ success = 0; fail = $Attempts; times = @() }
     }
 

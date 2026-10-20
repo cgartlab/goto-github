@@ -22,12 +22,15 @@ function Test-IpQuick {
     if (-not $curlPath) { return $false }
 
     try {
+        # Probe the git smart-http endpoint, not the homepage: an IP can serve
+        # the homepage while timing out on git traffic.
         $code = & $curlPath --resolve "github.com:443:$IP" `
             -s -o NUL `
             -w "%{http_code}" `
             --connect-timeout $script:CONNECT_TIMEOUT `
             --max-time $script:MAX_TIME `
-            "https://github.com/" 2>$null
+            -H 'Accept: application/x-git-upload-pack-advertisement' `
+            $script:PROBE_TARGET 2>$null
 
         if ($LASTEXITCODE -ne 0) { return $false }
         return ($code -eq '200' -or $code -eq '301' -or $code -eq '302')
