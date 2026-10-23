@@ -78,10 +78,20 @@ case "$out" in *'"https":{"state":'*) ok "Phase 1b reports https state" ;; *) ba
 
 TMPH=$(new_tmpfile)
 printf '127.0.0.1 localhost\n# keep\n' > "$TMPH"
+# Capture stderr too: when hosts_apply fails, the reason is on stderr and a
+# bare "not applied" assertion gives no way to diagnose it.
+errf=$(new_tmpfile)
 out=$(HOSTS_FILE="$TMPH" GOTO_GITHUB_TEST_PRIVILEGED=1 GOTO_GITHUB_FORCE_IP=140.82.114.21 \
-      "${RUN_BASH[@]}" scripts/hosts_apply.sh --strategy priority 2>/dev/null)
-valid_json "$out" && ok "Phase 3 hosts_apply: JSON" || bad "Phase 3 hosts_apply"
+      "${RUN_BASH[@]}" scripts/hosts_apply.sh --strategy priority 2>"$errf")
+valid_json "$out" && ok "Phase 3 hosts_apply: JSON" || {
+    bad "Phase 3 hosts_apply"
+    echo "    --- stderr ---"
+    sed 's/^/    /' "$errf" | head -20
+    echo "    --- stdout ---"
+    printf '%s\n' "$out" | head -5 | sed 's/^/    /'
+}
 case "$out" in *'"applied":true'*) ok "Phase 3 applied=true" ;; *) bad "Phase 3 not applied" ;; esac
+rm -f "$errf"
 grep -q '^# keep' "$TMPH" && ok "Phase 3 preserved content outside marker" || bad "Phase 3 clobbered hosts"
 [ "$(marker_count "$TMPH")" -eq 1 ] && ok "Phase 3 wrote exactly 1 marker block" || bad "Phase 3 wrote $(marker_count "$TMPH") blocks"
 

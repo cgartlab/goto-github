@@ -100,9 +100,14 @@ json_escape() {
 backup_hosts() {
     local backup
     backup="${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
-    if ! cp -p "$HOSTS_FILE" "$backup" 2>/dev/null && ! cp "$HOSTS_FILE" "$backup" 2>/dev/null; then
-        add_warning "backup failed; aborting without touching hosts"
-        return 1
+    # cp -p may fail on filesystems that cannot preserve metadata (macOS APFS
+    # with restricted dirs, Git Bash on NTFS). Fall back to plain cp; only if
+    # BOTH fail is the backup considered failed.
+    if ! cp -p "$HOSTS_FILE" "$backup" 2>/dev/null; then
+        if ! cp "$HOSTS_FILE" "$backup" 2>/dev/null; then
+            add_warning "backup failed (cannot write ${backup}); aborting without touching hosts"
+            return 1
+        fi
     fi
     # Prune older backups. The pipeline's exit status is deliberately ignored:
     # with `set -o pipefail`, `ls` returns non-zero when the glob matches
@@ -128,10 +133,22 @@ is_linux() { [ "$(uname)" = "Linux" ]; }
 write_hosts_block() {
     local ip="$1"
     local tmp_file perms
-    tmp_file=$(mktemp "${HOSTS_FILE}.XXXXXXXX") || {
+
+    # BSD mktemp (macOS) rejects a template whose Xs are not the final
+    # characters, and behaves differently with paths containing dots. Build the
+    # template so it is always "<dir>/<name>.XXXXXXXX" with the Xs last, and
+    # fall back to a plain mktemp if that still fails.
+    local hosts_dir hosts_base
+    hosts_dir=$(dirname "$HOSTS_FILE")
+    hosts_base=$(basename "$HOSTS_FILE")
+    tmp_file=$(mktemp "${hosts_dir}/${hosts_base}.XXXXXXXX" 2>/dev/null) \
+        || tmp_file=$(mktemp "${hosts_dir}/.goto-github.XXXXXXXX" 2>/dev/null) \
+        || tmp_file=$(mktemp 2>/dev/null)
+
+    if [ -z "$tmp_file" ]; then
         add_warning "failed to create temp file; hosts unchanged"
         return 1
-    }
+    fi
 
     # Remove any previous block (idempotency), keep every other line
     sed "/^${MARKER_START}/,/^${MARKER_END}$/d" "$HOSTS_FILE" > "$tmp_file"
