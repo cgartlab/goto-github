@@ -98,6 +98,64 @@ sudo ./scripts/hosts_apply.sh                 # Phase 3 写 hosts（需 root）
 | `sudo ./fetch.sh --restore` | 移除 goto-github 条目 | ✅ |
 | `./fetch.sh --help` | 显示帮助 | ❌ |
 
+#### 自动刷新与卸载（bash 侧需自建）
+
+bash 版本是**无状态脚本**：不注册计划任务、不写除了 hosts 标记块以外的任何系统位置。
+`ps1/` 的 `install` 会注册每 3 小时的 SYSTEM 任务，bash 侧没有对应物——这是有意的，
+因为 launchd / systemd / cron 三种宿主各有语义（用户级 vs 系统级、唤醒补跑、
+失败重试），硬做一套会引入比它解决的问题更多的不确定性。
+
+需要自动刷新时，用你自己的调度器。hosts 里的 IP 会失效，刷新频率取 3–6 小时较合适。
+
+注意：安装脚本把命令放在 ~/.local/bin/goto-github（不是 /usr/local/bin），而定时任务以 root 身份运行时 ~ 指向 root 的家目录，所以下面一律写绝对路径 —— 把 /home/YOU 换成实际安装用户的 home。
+
+**Linux（systemd timer，带唤醒补跑）**
+
+```ini
+# /etc/systemd/system/goto-github.service
+[Unit]
+Description=Refresh GitHub hosts entries
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/YOU/.local/bin/goto-github
+```
+
+```ini
+# /etc/systemd/system/goto-github.timer
+[Unit]
+Description=Refresh GitHub hosts entries every 3h
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=3h
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl enable --now goto-github.timer
+```
+
+**Linux / macOS（cron，更简单但没有唤醒补跑）**
+
+```bash
+sudo crontab -e
+# 每 3 小时的第 17 分钟执行
+17 */3 * * * /home/YOU/.local/bin/goto-github >/dev/null 2>&1
+```
+
+**卸载**
+
+```bash
+sudo goto-github --restore                                    # 只清标记块内部
+rm -rf ~/.local/share/goto-github ~/.local/bin/goto-github
+```
+
+> `--restore` 不会碰 hosts 里其他工具的条目。
+
 ### PowerShell (Windows)
 
 | 命令 | 功能 | 需管理员 |

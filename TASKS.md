@@ -10,88 +10,6 @@
 
 ---
 
-## 高优先级
-
-### T2. argus Bug 3：主模型超时不落入 fallback 队列
-
-**依据**（跨仓库，`cgartlab/argus`）：
-
-`.github/actions/argus-review/action.yml` 的 `run_with_fallback_queue` 里，
-
-```bash
-if [ $primary_exit_code -eq 124 ]; then
-    # 注释写着 "treat as retryable so the fallback queue runs"
-    # 但只 echo + dismiss_stale_reviews，既不设标志也不 return
-fi
-```
-
-随后代码按 `$primary_output` 内容匹配 `retry_re`，超时输出不匹配，于是
-`return $primary_exit_code` 提前退出，整个 fallback 队列被跳过。
-
-**实测**：2026-10-19 12:35 的重跑，主模型 480s 超时后 **8ms 内直接进 restore 步**，
-队列里的 `opencode/nemotron-3.5-super-vl-free`、`opencode/space-bunny-free` 完全没跑。
-
-**影响**：所有 pin `cgartlab/argus@main` 的仓库，review 门在超时场景下
-必红，且 fallback 形同虚设。
-
-**修复方向**：把 `exit_code -eq 124` 分支并入 `elif` 链，或设置一个
-`primary_unusable=1` 标志，让 124 绕过 `retry_re` 闸门直入 fallback 循环。
-
-**验收标准**：
-- 构造一次主模型超时（可用环境变量把主模型指向不可达地址）后，
-  日志里能看到 fallback 队列的尝试记录
-- 修复后 review 在超时场景下仍能产出结论，而不是直接失败
-
-**为什么不在本仓库改**：这是 argus 仓库的代码，且那边有并行会话在工作，
-动手前需先确认不撞车。
-
----
-
-## 中优先级
-
-### T3. bash 侧缺计划任务与卸载，与 ps1/ 能力不对等
-
-**依据**：
-
-| 能力 | bash (`fetch.sh`) | `ps1/` |
-|---|---|---|
-| 一次性运行 | `sudo ./fetch.sh` | `run` |
-| 状态 | `--status` | `status` |
-| 恢复 hosts | `--restore` | 随 `uninstall` |
-| **自动刷新（计划任务）** | **无** | `install` 注册每 3 小时 SYSTEM 任务 |
-| **卸载** | **无**（需手动 `rm` + `--restore`） | `uninstall` 完整清理 |
-
-`grep -rn 'cron|systemd|launchd' fetch.sh lib/` 只命中 `systemctl restart systemd-resolved`，
-那是 DNS 刷新，不是计划任务。
-
-**影响**：hosts 里的 IP 会失效，bash 用户必须记得手动重跑；卸载也没有官方路径。
-
-**验收标准**（二选一，先定方向再动手）：
-- **方案 A（补齐）**：macOS 用 launchd plist、Linux 用 systemd timer / cron，
-  `fetch.sh install` 注册、`fetch.sh uninstall` 移除；README 记录
-- **方案 B（写清现状）**：在 README 明确「bash 侧需用户自建 cron」，并给出示例
-
-**决策点**：A 会让 bash 侧从「无状态脚本」变成「需要维护的东西」，
-影响面比 ps1/ 更大。建议先做 B，等有真实需求再升 A。
-
----
-
-### T4. `connectivity_probe --scope all` 未被 CI 覆盖
-
-**依据**：CI 的 `cross-platform` job 跑的是 `evals/run_e2e.sh`，其中
-`connectivity_probe` 默认 `--scope fast`（10 个端点）。`--scope all` 追加的
-6 个端点（ghcr / npmpkg / mavenpkg / avatars / objects / pages）在 CI 里从未执行。
-
-**影响**：这 6 个端点的探测逻辑出错不会被发现。它们只在用户手动加
-`--scope all` 时才会跑到。
-
-**验收标准**：
-- CI 增加一步 `connectivity_probe --scope all --attempts 1`
-- 断言输出里端点数为 16（fast 的 10 + all 追加的 6）
-- 允许端点自身失败（外部网络不可控），只断言 **JSON 结构正确、端点齐全**
-
----
-
 ## 低优先级
 
 ### T5. `ps1/` 与根 `goto-github.ps1` 的长期去留
@@ -114,6 +32,9 @@ fi
 
 | 版本 | 内容 | PR |
 |---|---|---|
+| 2.1.x（argus 侧） | T2 完成：argus 超时后真正进入 fallback 队列（`eb60ac3`），并由 argus #209 / v0.6.7 修掉校验器假失败与 `bump_version` 未提升 Unreleased | argus#209 |
+| 2.1.x | T3 完成（方案 B）：README 新增「自动刷新与卸载（bash 侧需自建）」，给出 systemd timer / cron 两种示例与卸载步骤；同时修正示例路径——安装脚本把命令放在 `~/.local/bin`，此前示例误写 `/usr/local/bin` | — |
+| 2.1.x | T4 完成：`--scope all` 的 6 个端点纳入 e2e（两侧各 3 条断言，反向验证过）；顺带修掉 `pages` 端点硬编码维护者个人站点的问题，改为从 `PROBE_REPO` 的 owner 推导 | — |
 | 2.1.0 tag | `v2.1.0` 已打并推送（annotated tag，指向 `0b2080c`） | — |
 | 2.1.0 | 服务面 5 → 10+ 端点；新增 `auth_probe` 分离认证/网络失败；PS 5.1 真正可用；三平台 CI 矩阵 | #56, #57 |
 | 2.0.0 | 仓库重构为 Agent Skill 包（`SKILL.md` + `references/` + `scripts/` + `evals/`） | #55 |
