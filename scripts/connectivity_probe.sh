@@ -3,23 +3,23 @@
 # scripts/connectivity_probe.sh — Phase 1 connectivity sampling (read-only)
 # Outputs single-line JSON to stdout; progress goes to stderr.
 # =============================================================================
-# Samples 5 GitHub endpoints N times each, reporting success rate and latency
-# distribution. ALWAYS bypasses the proxy (--noproxy '*') — probing through a
-# proxy measures the proxy, not the machine's connectivity to GitHub.
+# Samples the full GitHub service surface N times each, reporting success rate
+# and latency distribution. ALWAYS bypasses the proxy (--noproxy '*') — probing
+# through a proxy measures the proxy, not the machine's connectivity.
+#
+# Why the full surface and not 5 endpoints: a developer reaches GitHub through
+# many independent paths (git read/write, API, raw, registries, SSH). A narrow
+# probe says "GitHub is fine" while `docker pull ghcr.io/...` is dead.
 #
 # Why N samples: single-request outcomes are near-random under this kind of
-# interference. Measured: the same endpoint went 60% -> 30% between two runs
-# one minute apart. Only the success rate is meaningful.
+# interference. Measured: the same endpoint went 60% -> 20% over three days,
+# while api/git stayed at 100%. Only the success rate is meaningful.
+#
+# bash 3.2 compatible (macOS default).
 # =============================================================================
 # Usage:
-#   ./scripts/connectivity_probe.sh [--attempts N] [--timeout SEC] [--help]
-#
-# Options:
-#   --attempts N   samples per endpoint (default 10, minimum 5 for a verdict)
-#   --timeout SEC  connect timeout in seconds (default 5)
-#
-# Environment:
-#   PROBE_REPO  owner/repo used for git/download endpoints (default: this repo)
+#   ./scripts/connectivity_probe.sh [--attempts N] [--timeout SEC]
+#                                   [--scope fast|all] [--help]
 # =============================================================================
 
 set -uo pipefail
@@ -34,26 +34,42 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 
-# The skill layer's own constants — deliberately NOT lib/00-constants.sh, which
-# belongs to the pull-based CLI implementation.
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib/constants.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/endpoints.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/probe.sh"
+
+ATTEMPTS=10
+CONNECT_TIMEOUT=5
+SCOPE="fast"
 
 show_help() {
     cat <<'EOF'
-Usage: connectivity_probe.sh [--attempts N] [--timeout SEC] [--help]
+Usage: connectivity_probe.sh [--attempts N] [--timeout SEC] [--scope fast|all] [--help]
 
 Phase 1 connectivity sampling for the goto-github skill. Read-only.
 
-Samples 5 GitHub endpoints N times each and reports success rate plus
-latency distribution (min/max/avg). Always bypasses the proxy.
+Samples every GitHub service surface N times each and reports success rate with
+latency distribution (min/max/avg). Always bypasses the proxy. Machine-readable
+JSON on stdout; progress on stderr.
+
+Endpoint groups:
+  web       github.com front page
+  api       api.github.com (gh CLI, REST, GraphQL)
+  git       smart-http: git_read (clone/fetch) and git_write (push handler)
+  raw       raw.githubusercontent.com, gist.githubusercontent.com
+  download  codeload.github.com (tarballs, zips)
+  assets    github.githubassets.com
+  ssh       tcp://github.com:22, tcp://ssh.github.com:443 (transport only;
+            authentication is a separate dimension — see auth_probe)
+  registry  ghcr.io, npm.pkg.github.com, maven.pkg.github.com (--scope all)
 
 Options:
-  --attempts N   samples per endpoint (default 10; below 5 the verdict is
-                 unstable and the report must say so)
+  --attempts N   samples per endpoint (default 10; below 5 not meaningful)
   --timeout SEC  connect timeout in seconds (default 5)
-
-Output: single-line JSON on stdout.
+  --scope S      fast (default) covers everything except registries/assets
 
 Environment:
   PROBE_REPO  owner/repo for git/download endpoints (default cgartlab/goto-github)
@@ -64,27 +80,16 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --attempts) ATTEMPTS="${2:-10}"; shift 2 ;;
         --timeout)  CONNECT_TIMEOUT="${2:-5}"; shift 2 ;;
+        --scope)    SCOPE="${2:-fast}"; shift 2 ;;
         --help|-h)  show_help; exit 0 ;;
         *) echo "Unknown option: $1" >&2; show_help >&2; exit 1 ;;
     esac
 done
 
-# Guard: fewer than 5 samples cannot support a verdict.
 if [ "$ATTEMPTS" -lt 5 ]; then
     echo "WARNING: --attempts $ATTEMPTS is below 5; the success rate is not statistically meaningful" >&2
 fi
 
-# ── Endpoint table (order is fixed — see references/judgment-criteria.md) ────
-# key<TAB>url
-endpoints() {
-    printf 'web\thttps://github.com/\n'
-    printf 'api\thttps://api.github.com/\n'
-    printf 'download\thttps://codeload.github.com/%s/tar.gz/refs/heads/main\n' "$PROBE_REPO"
-    printf 'raw\thttps://raw.githubusercontent.com/%s/main/README.md\n' "$PROBE_REPO"
-    printf 'git\thttps://github.com/%s/info/refs?service=git-upload-pack\n' "$PROBE_REPO"
-}
-
-# ── JSON escaping ────────────────────────────────────────────────────────────
 json_escape() {
     local s="$1"
     s="${s//\\/\\\\}"
@@ -95,62 +100,19 @@ json_escape() {
     printf '%s' "$s"
 }
 
-# ── Sample one endpoint N times ──────────────────────────────────────────────
-# Emits: "success fail min max avg" (avg/min/max empty when zero successes)
-sample_endpoint() {
-    local url="$1"
-    local ok=0 fail=0
-    local times=()
-    local i out rc code t
-
-    for ((i = 1; i <= ATTEMPTS; i++)); do
-        out=$(curl --noproxy '*' -s -o /dev/null \
-            --connect-timeout "$CONNECT_TIMEOUT" \
-            --max-time $((CONNECT_TIMEOUT + 2)) \
-            -w '%{http_code},%{time_total}' \
-            "$url" 2>/dev/null)
-        rc=$?
-
-        # rc=0 AND a real HTTP code (not 000) = success.
-        # 000 means no response at all: connection failed, timeout, or DNS
-        # failure. Counting it as success would report a fully blocked
-        # endpoint as "100% available".
-        code="${out%%,*}"
-        if [ $rc -eq 0 ] && [ "$code" != "000" ] && [ -n "$code" ]; then
-            ok=$((ok + 1))
-            t="${out##*,}"
-            times+=("$t")
-        else
-            fail=$((fail + 1))
-        fi
-    done
-
-    local min="" max="" sum="0" avg=""
-    if [ ${#times[@]} -gt 0 ]; then
-        for t in "${times[@]}"; do
-            min=$(awk -v a="$t" -v b="${min:-99}" 'BEGIN{print (a<b)?a:b}')
-            max=$(awk -v a="$t" -v b="${max:-0}" 'BEGIN{print (a>b)?a:b}')
-            sum=$(awk -v a="$t" -v b="$sum" 'BEGIN{printf "%.6f", a+b}')
-        done
-        avg=$(awk -v s="$sum" -v n="${#times[@]}" 'BEGIN{printf "%.3f", s/n}')
-        min=$(awk -v m="$min" 'BEGIN{printf "%.3f", m}')
-        max=$(awk -v m="$max" 'BEGIN{printf "%.3f", m}')
-    fi
-
-    printf '%d %d %s %s %s\n' "$ok" "$fail" "${min:-null}" "${max:-null}" "${avg:-null}"
-}
-
 # ── Main ─────────────────────────────────────────────────────────────────────
 timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 endpoints_json=""
 first=1
 
-while IFS=$'\t' read -r key url; do
+# fd 3, not stdin: curl in the loop body inherits stdin and can swallow the
+# remaining endpoint lines (observed: 10 endpoints reduced to 9).
+exec 3< <(list_endpoints "$SCOPE")
+while IFS=$'\t' read -r key url group kind <&3; do
     [ -z "$key" ] && continue
 
     echo "  probing $key ($url) ..." >&2
-
-    read -r ok fail min max avg <<< "$(sample_endpoint "$url")"
+    read -r ok fail min max avg <<< "$(probe_endpoint "$url" "$kind" "$ATTEMPTS" "$CONNECT_TIMEOUT")"
     rate=$(awk -v o="$ok" -v n="$ATTEMPTS" 'BEGIN{printf "%.0f", (o/n)*100}')
 
     if [ "$min" = "null" ]; then
@@ -161,23 +123,19 @@ while IFS=$'\t' read -r key url; do
 
     [ $first -eq 0 ] && endpoints_json+=","
     first=0
-    endpoints_json+="{\"key\":\"$key\",\"url\":\"$(json_escape "$url")\",\"success\":$ok,\"fail\":$fail,\"rate\":$rate,\"latency\":$lat}"
+    endpoints_json+="{\"key\":\"$key\",\"url\":\"$(json_escape "$url")\",\"group\":\"$group\",\"kind\":\"$kind\",\"success\":$ok,\"fail\":$fail,\"rate\":$rate,\"latency\":$lat}"
 
     echo "    -> $ok/$ATTEMPTS ($rate%)" >&2
-done < <(endpoints)
-
-# Sample-size caveat belongs in the JSON, not only on stderr.
-sample_warning=""
-if [ "$ATTEMPTS" -lt 5 ]; then
-    sample_warning="\"sample_size is $ATTEMPTS (below 5); the success rate is not statistically meaningful\""
-fi
+done
+# shellcheck disable=SC2181
+exec 3<&-
 
 warn_json="[]"
-if [ -n "$sample_warning" ]; then
-    warn_json="[$sample_warning]"
+if [ "$ATTEMPTS" -lt 5 ]; then
+    warn_json="[\"sample_size is $ATTEMPTS (below 5); the success rate is not statistically meaningful\"]"
 fi
 
 printf '%s\n' "$(cat <<EOF
-{"timestamp":"$timestamp","proxy_bypassed":true,"attempts":$ATTEMPTS,"endpoints":[$endpoints_json],"warnings":$warn_json}
+{"timestamp":"$timestamp","proxy_bypassed":true,"attempts":$ATTEMPTS,"scope":"$SCOPE","endpoints":[$endpoints_json],"warnings":$warn_json}
 EOF
 )"
