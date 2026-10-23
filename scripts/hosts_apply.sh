@@ -331,7 +331,14 @@ try_cidr_scan() {
 
     [ "${#pool[@]}" -eq 0 ] && return 1
 
-    winner=$(for cand in "${pool[@]}"; do
+    # Scan sequentially, keeping the first hit. The previous version used
+    # `winner=$(for ...; do ...; done | head -1)`. bash 3.2 (macOS default)
+    # cannot parse a `case` inside a command substitution inside a for-loop
+    # whose output is piped — it reports "syntax error near unexpected token
+    # ';;'" at the case label, pointing at a line that is perfectly valid.
+    # A plain loop with an explicit break avoids the construct entirely.
+    winner=""
+    for cand in "${pool[@]}"; do
         code=$(curl --noproxy '*' -s -o /dev/null \
             --connect-timeout 2 --max-time 5 \
             -w '%{http_code}' \
@@ -339,9 +346,12 @@ try_cidr_scan() {
             "$GIT_PROBE_TARGET" \
             --resolve "github.com:443:${cand}" 2>/dev/null || true)
         case "$code" in
-            2*) echo "$cand" ;;
+            2*)
+                winner="$cand"
+                break
+                ;;
         esac
-    done | head -1)
+    done
 
     if [ -n "$winner" ]; then
         echo "$winner"
