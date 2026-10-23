@@ -55,10 +55,10 @@ list_endpoints() {
         printf 'avatars\thttps://avatars.githubusercontent.com/\tassets\thttp\n'
         printf 'objects\thttps://objects.githubusercontent.com/\tassets\thttp\n'
         # Derive the Pages host from PROBE_REPO's owner instead of hard-coding one
-    # account: a fork or another user's install must probe their own Pages
-    # site, not a stranger's.
-    local owner="${repo%%/*}"
-    printf 'pages\thttps://%s.github.io/\tweb\thttp\n' "$owner"
+        # account: a fork or another user's install must probe their own Pages
+        # site, not a stranger's.
+        local owner="${repo%%/*}"
+        printf 'pages\thttps://%s.github.io/\tweb\thttp\n' "$owner"
     fi
 }
 

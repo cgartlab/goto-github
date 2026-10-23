@@ -89,6 +89,17 @@ done
 [ "$all_present" -eq 1 ] && ok "Phase 1 --scope all includes all 6 registry/asset endpoints" \
     || bad "Phase 1 --scope all is missing endpoints"
 
+# The default repo is the maintainer one, so a hardcoded Pages host would
+# still satisfy the assertions above. Probe a *different* owner to prove the
+# host is actually derived from PROBE_REPO.
+alt_out=$(PROBE_REPO=example-org/example-repo "${RUN_BASH[@]}" \
+    scripts/connectivity_probe.sh --attempts 1 --timeout 3 --scope all 2>/dev/null)
+case "$alt_out" in
+    *'"key":"pages","url":"https://example-org.github.io/"'*)
+        ok "pages host derives from PROBE_REPO owner" ;;
+    *) bad "pages host is still hardcoded (PROBE_REPO had no effect)" ;;
+esac
+
 out=$("${RUN_BASH[@]}" scripts/auth_probe.sh 2>/dev/null)
 valid_json "$out" && ok "Phase 1b auth_probe: JSON" || bad "Phase 1b auth_probe"
 case "$out" in *'"ssh":{"state":'*)   ok "Phase 1b reports ssh state" ;;   *) bad "ssh state missing" ;; esac
@@ -137,6 +148,25 @@ else
     valid_json "$out" && ok "PS Phase 1 --scope all: JSON" || bad "PS Phase 1 --scope all"
     n=$(printf '%s' "$out" | grep -o '"key":' | wc -l)
     [ "$n" -ge 16 ] && ok "PS Phase 1 --scope all covers $n endpoints" || bad "PS Phase 1 --scope all only $n endpoints"
+    # Same per-key loop as the bash block: a duplicate key plus a missing one
+    # still satisfies n >= 16, so the count alone cannot catch that.
+    all_present=1
+    for k in ghcr npmpkg mavenpkg avatars objects pages; do
+        case "$out" in
+            *"\"key\":\"$k\""*) ;;
+            *) all_present=0; echo "    missing endpoint: $k" ;;
+        esac
+    done
+    [ "$all_present" -eq 1 ] && ok "PS --scope all includes all 6 endpoints" \
+        || bad "PS Phase 1 --scope all is missing endpoints"
+
+    alt_out=$(PROBE_REPO=example-org/example-repo "$PS_EXE" -NoProfile \
+        -File scripts/connectivity_probe.ps1 -Attempts 1 -Timeout 3 -Scope all 2>/dev/null)
+    case "$alt_out" in
+        *'"key":"pages","url":"https://example-org.github.io/"'*)
+            ok "PS pages host derives from PROBE_REPO owner" ;;
+        *) bad "PS pages host is still hardcoded (PROBE_REPO had no effect)" ;;
+    esac
 
     out=$("$PS_EXE" -NoProfile -File scripts/auth_probe.ps1 2>/dev/null)
     valid_json "$out" && ok "PS Phase 1b auth_probe: JSON" || bad "PS Phase 1b"

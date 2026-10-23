@@ -100,7 +100,7 @@ sudo ./scripts/hosts_apply.sh                 # Phase 3 写 hosts（需 root）
 
 #### 自动刷新与卸载（bash 侧需自建）
 
-bash 版本是**无状态脚本**：不注册计划任务、不写除了 hosts 标记块以外的任何系统位置。
+bash 版本是**无状态脚本**：不注册计划任务。运行时会写 hosts 标记块，并在其旁边保留最近 5 个 `hosts.goto-github.bak.*` 备份；除此之外不写任何系统位置。
 `ps1/` 的 `install` 会注册每 3 小时的 SYSTEM 任务，bash 侧没有对应物——这是有意的，
 因为 launchd / systemd / cron 三种宿主各有语义（用户级 vs 系统级、唤醒补跑、
 失败重试），硬做一套会引入比它解决的问题更多的不确定性。
@@ -109,12 +109,13 @@ bash 版本是**无状态脚本**：不注册计划任务、不写除了 hosts �
 
 注意：安装脚本把命令放在 ~/.local/bin/goto-github（不是 /usr/local/bin），而定时任务以 root 身份运行时 ~ 指向 root 的家目录，所以下面一律写绝对路径 —— 把 /home/YOU 换成实际安装用户的 home。
 
-**Linux（systemd timer，带唤醒补跑）**
+**Linux（systemd timer，关机 / 休眠后自动补跑）**
 
 ```ini
 # /etc/systemd/system/goto-github.service
 [Unit]
 Description=Refresh GitHub hosts entries
+Wants=network-online.target
 After=network-online.target
 
 [Service]
@@ -129,7 +130,8 @@ Description=Refresh GitHub hosts entries every 3h
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=3h
+OnCalendar=*:0/3
+Persistent=true
 
 [Install]
 WantedBy=timers.target
@@ -138,6 +140,8 @@ WantedBy=timers.target
 ```bash
 sudo systemctl enable --now goto-github.timer
 ```
+
+> **`Persistent=true` 只对 `OnCalendar=` 生效。** 单调定时器（`OnBootSec` / `OnUnitActiveSec`）在休眠或关机期间不会补跑——如果只用那两种，错过的时间段就跳过了。上面的组合用 `OnBootSec` 覆盖开机，用 `OnCalendar` + `Persistent` 覆盖日常与补跑。
 
 **Linux / macOS（cron，更简单但没有唤醒补跑）**
 
@@ -150,8 +154,23 @@ sudo crontab -e
 **卸载**
 
 ```bash
-sudo goto-github --restore                                    # 只清标记块内部
+# $HOME 在 sudo 之前展开；sudo 通常会把 PATH 重置为 secure_path，
+# 里面不含 ~/.local/bin，直接写 `sudo goto-github` 会 command not found。
+sudo "$HOME/.local/bin/goto-github" --restore
 rm -rf ~/.local/share/goto-github ~/.local/bin/goto-github
+```
+
+如果按上面的示例配了定时器，先停掉它，否则删掉二进制后它会一直失败：
+
+```bash
+sudo systemctl disable --now goto-github.timer
+sudo rm -f /etc/systemd/system/goto-github.service \
+           /etc/systemd/system/goto-github.timer
+sudo systemctl daemon-reload
+# cron 用户：sudo crontab -e 删掉那行 goto-github
+
+# 备份文件保留在 hosts 旁边，确认无误后可清理：
+#   sudo rm -f /etc/hosts.goto-github.bak.*
 ```
 
 > `--restore` 不会碰 hosts 里其他工具的条目。
