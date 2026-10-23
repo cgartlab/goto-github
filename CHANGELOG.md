@@ -20,6 +20,113 @@ implementation's defects, but the shipped CLI entry points behave the same, so
 the CLI artifacts stay at 1.0.0. Do not "helpfully" sync the two numbers — an
 `install.sh --update` against a mismatched `VERSION` reports a bogus upgrade.
 
+2.1.0 keeps that split: the skill's service surface, auth model and platform
+support all changed, while the CLI entry points still behave the same, so the
+CLI artifacts remain at 1.0.0.
+
+## [2.1.0] — 2026-10-23
+
+目标：在 macOS / Windows / Linux 上运行即可打通本地直连访问**全部** GitHub
+服务。2.0.0 只测 5 个端点、要求 PowerShell 7、且把认证失败报成网络失败，
+不满足这个目标。
+
+### Added — 服务面从 5 个端点扩到 10+ 个
+
+`scripts/lib/endpoints.{sh,ps1}` 成为端点清单的唯一真源，两个实现共享。
+
+| 端点 | 覆盖 |
+|---|---|
+| `git_read` | git smart-http `upload-pack`（clone / fetch） |
+| `git_write` | git smart-http `receive-pack`（**push**，此前完全未测） |
+| `ssh22` / `ssh443` | SSH 传输层（22 端口，以及 22 被封时的 443 备用口） |
+| `gist` / `assets` | gist 与静态资源 |
+| `--scope all` | 追加 ghcr / npm.pkg / maven.pkg / avatars / objects / pages |
+
+`git_write` 是新增的关键覆盖：只探读路径时，push 失败skill 无法解释。
+
+### Added — `auth_probe` 把「认证失败」与「网络失败」分开
+
+新脚本 `scripts/auth_probe.{sh,ps1}`，三路凭据状态，与网络维度并列、永不合并：
+
+```
+ssh.state     transport-ok | auth-fail | blocked | no-key | unknown
+https.state   ok | permission-denied | no-credentials | unknown
+gh.state      keyring_ok | env_var_shadowed | none | error
+```
+
+关键区分：`Permission denied (publickey)` → `auth-fail`（传输已通，密钥未注册）；
+`Connection refused` / `timed out` → `blocked`（根本没连上）。两者都让 `ssh -T`
+失败，但修复方向完全相反。
+
+一次失败的 `git push` 至少有四种原因，连通性探测会把它们全报成 FAIL 并把
+用户引向修网络——这正是本 skill 最该避免的错误。
+
+### Added — 三平台 CI 门禁
+
+新增 `cross-platform` job，矩阵 `ubuntu-latest / macos-latest / windows-latest`：
+
+1. `.sh` 行尾检查（CRLF 让 shebang 变成 `bash\r`，Linux/macOS 无法执行）
+2. bash 3.2 构造检查（`declare -A` / `mapfile` / `${x,,}` / nameref）
+3. `.ps1` 编码检查（非 ASCII 且无 BOM 时 PS 5.1 按 ANSI 码页解码）
+4. 嵌套 heredoc 检查（bash 3.2 无法解析 `$(cat <<EOF)`）
+5. 五阶段端到端 `evals/run_e2e.sh`
+6. 冒烟 `SKIP_NETWORK=1`
+
+### Added — `evals/run_e2e.sh`
+
+按用户真实用法跑完整五阶段（Phase 0 → 1 → 1b → 3 → 4），同时覆盖 bash 与
+PowerShell 两条路径。与 `run_smoke.sh` 分工：smoke 检查单脚本契约，e2e 检查
+阶段之间的衔接。不依赖网络。
+
+### Changed — PowerShell 5.1 真正可用
+
+Windows 默认是 PS 5.1，2.0.0 的 3 个 skill 脚本声明 `#Requires -Version 7.0`，
+在默认环境直接拒绝运行。
+
+- `ForEach-Object -Parallel` → runspace pool（5.1/7 都支持）
+- `File.Move(src, dst, overwrite)` → `File.Replace`（三参重载是 .NET Core 专属）
+- `[Type]::new()` → `New-Object` / 强制转换
+- 临时文件改到 hosts 同目录（`File.Replace` 要求同卷）
+- 7 个 `.ps1` 归一为纯 ASCII（PS 5.1 按 ANSI 码页解码无 BOM 文件会乱码）
+
+### Fixed — 跨平台致命缺陷（4 个，全部由 CI 暴露）
+
+- **`.sh` 写入 CRLF**：shebang 变 `bash\r`，Linux/macOS 报
+  `/usr/bin/env: 'bash\r': No such file`
+- **`declare -A`**：macOS 自带 bash 3.2 不支持关联数组，直接语法错误
+- **`case` 嵌套在 `$( )` 的 `for` 循环内**：bash 3.2 报
+  `syntax error near unexpected token ';;'`，指向一行完全合法的代码。
+  本地 bash 5.3 与 Linux CI 全绿，只有 macOS 暴露
+- **`mktemp -t prefix-XXXXXX`**：BSD mktemp 要求 Xs 是最后字符
+
+### Fixed — 其他
+
+- `hosts_status` 改善判定加 10 个百分点噪声阈值：99% → 100% 的 1 点波动
+  曾被计为「修复生效」
+- bash 拼 JSON 未转义反斜杠会让整行不可解析（Windows 路径）
+- PowerShell `Write-Warning` 的 warning stream 在管道捕获时被转发到 stdout，
+  破坏「stdout 只有一行 JSON」契约
+- `backup_hosts()` 的返回值被 `set -o pipefail` 污染（`ls` 空 glob 返回非零）
+- `Get-Service` 检测 ssh-agent 在 Linux/macOS 上不存在
+
+### Changed — 判定模型
+
+`references/judgment-criteria.md` 改写为**两个独立维度**：`network`（四档）+
+`auth`（三路），明确禁止合并。非核心端点（raw / gist / download / assets /
+ssh* / registry）报告但不参与分级——一个 registry 慢不应把「能不能 clone」降级。
+
+### Verification
+
+| 平台 | 运行时 | 结果 |
+|---|---|---|
+| macOS | bash 3.2.57（系统自带） | e2e pass |
+| Ubuntu | bash 5.x | e2e pass |
+| Windows | PowerShell 5.1 + Git Bash | e2e pass |
+
+本机（Windows）另跑：`shellcheck --severity=warning` 0 warning、bash 单元测试
+5 文件全过、`parity` OK、PS7 单元测试 58/58、PSScriptAnalyzer 0 error、
+`evals/run_e2e.sh` 25/25。
+
 ## [2.0.0] — 2026-10-20
 
 ### Added — Skill 包形态

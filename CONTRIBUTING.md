@@ -13,6 +13,8 @@ sudo ./fetch.sh             # 测试完整流程（需 sudo）
 
 ./scripts/env_detection.sh        # skill：环境探测（只读）
 ./scripts/connectivity_probe.sh   # skill：连通性采样（只读）
+./scripts/auth_probe.sh           # skill：凭据状态（只读）
+./scripts/hosts_status.sh         # skill：复测与 verdict（只读）
 ```
 
 **PowerShell (Windows):**
@@ -26,6 +28,7 @@ cd goto-github
 
 .\scripts\env_detection.ps1 -Help            # skill：环境探测（只读）
 .\scripts\connectivity_probe.ps1 -Attempts 5 # skill：连通性采样（只读）
+.\scripts\auth_probe.ps1                     # skill：凭据状态（只读）
 ```
 
 ## 分支规范

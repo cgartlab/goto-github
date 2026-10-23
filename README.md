@@ -18,19 +18,62 @@ GitHub 访问诊断与加速。先探测本机到 GitHub 各端点的连通性�
 - "clone 失败 / push 失败"
 - "GitHub 现在能用吗 / 直连是否正常 / 要不要改 hosts"
 
-Skill 会依次执行：环境探测 → 5 端点统计采样 → 分级判定 → （需要时）写 hosts 修复 → 复测验证，最后给出分级报告。
+Skill 会依次执行：环境探测 → 10+ 端点统计采样 → 分级判定 → （需要时）写 hosts 修复 → 复测验证，最后给出分级报告。
 
 核心设计：**分级报告而非"能用/不能用"**。GitHub 是多个独立端点，干扰按路径而非按 IP——实测中同 IP 的 API 100% 而网页 30%。合并成一个结论会丢失真正有用的信息。
 
 ```
-Phase 0  环境探测      hosts 条目 / 遮蔽 / 代理 / DNS / gh 鉴权
-Phase 1  连通性采样    5 端点 × N 次（默认 10），绕代理，000 不计成功
-Phase 2  判定          direct_ok / hosts_needed / partial / proxy_needed
-Phase 3  修复          优先级 IP → 社区源 → CIDR 扫描；备份→标记块→遮蔽检测→刷 DNS
-Phase 4  报告          复测对比，未改善则如实报 not_fixed
+Phase 0   环境探测     hosts 条目 / 遮蔽 / 代理 / DNS / gh 鉴权 / DoH
+Phase 1   连通性采样   10+ 端点 × N 次（默认 10），绕代理，000 不计成功
+                       web / api / git_read / git_write / raw / gist /
+                       download / assets / ssh22 / ssh443
+Phase 1b  凭据探测     ssh / https / gh 三路状态，与网络维度分开
+Phase 2   判定         network（四档）+ auth（三路），两个维度永不合并
+Phase 3   修复         优先级 IP → 社区源 → CIDR 扫描；备份→标记块→遮蔽检测→刷 DNS
+Phase 4   报告         复测对比，未改善则如实报 not_fixed
+```
+
+**认证失败不等于网络失败**。一次失败的 `git push` 至少有四种原因，连通性探测会把它们全报成 FAIL 并把用户引向修网络：
+
+```
+auth_probe 实测输出：
+  ssh    auth-fail        <- 传输正常（22/443 都可达），密钥未在任何 GitHub 账号注册
+  https  ok               <- gh token 有 push 权限，所以 push 一直正常
+  gh     keyring_ok
 ```
 
 Skill 文档：`SKILL.md`（路由与流程）、`references/`（判定阈值、JSON 契约、安全边界、环境要求）。
+
+---
+
+### 直接运行 skill 脚本
+
+脚本是黑盒的：先 `--help`，输出单行 JSON 到 stdout，进度走 stderr。不通过 Agent 也能用。
+
+**bash（macOS / Linux / Git Bash）**
+
+```bash
+./scripts/env_detection.sh                    # Phase 0 环境探测（只读）
+./scripts/connectivity_probe.sh --attempts 10 # Phase 1 连通性采样（只读）
+./scripts/connectivity_probe.sh --scope all   # 追加 registry / pages
+./scripts/auth_probe.sh                       # Phase 1b 凭据状态（只读）
+sudo ./scripts/hosts_apply.sh                 # Phase 3 写 hosts（需 root）
+./scripts/hosts_status.sh --baseline before.json  # Phase 4 复测（只读）
+```
+
+**PowerShell（Windows，5.1 与 7 均可）**
+
+```powershell
+.\scripts\env_detection.ps1                     # Phase 0
+.\scripts\connectivity_probe.ps1 -Attempts 10   # Phase 1
+.\scripts\connectivity_probe.ps1 -Scope all     # 追加 registry / pages
+.\scripts\auth_probe.ps1                        # Phase 1b
+.\scripts\hosts_apply.ps1 -Strategy auto        # Phase 3（需管理员）
+.\scripts\hosts_status.ps1 -Baseline .\before.json
+```
+
+典型用法：先 `connectivity_probe.sh > before.json` 存基线，`hosts_apply` 修复，再 `hosts_status.sh --baseline before.json` 看是否真的改善。
+
 
 ---
 
