@@ -181,11 +181,15 @@ GitHub 按 IP 精确干扰时，社区源列出的 IP 可能恰好被阻断。�
 ## 开发
 
 ```bash
-make lint      # shellcheck --severity=warning（0 warnings）
-make test      # bash 单元测试（mock curl，无需网络）
-make parity    # bash ↔ PowerShell 常量一致性
-make ps-test   # ps1/ 单元测试（仅 Windows，需 pwsh 7）
+make lint        # shellcheck --severity=warning（0 warnings，含 scripts/ 与 evals/）
+make test        # bash 单元测试（mock curl，无需网络）
+make parity      # bash ↔ PowerShell 常量一致性
+make skill-test  # skill 脚本 --help 冒烟
+make e2e         # 五阶段端到端（bash + PowerShell 两条路径）
+make ps-test     # ps1/ 单元测试（仅 Windows，需 pwsh 7）
 ```
+
+要做的改动若对应 `TASKS.md` 里的条目，按它的验收标准收尾。
 
 ## 许可证
 

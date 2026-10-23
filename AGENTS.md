@@ -49,6 +49,7 @@ goto-github/
 ├── Makefile                # make lint / test / parity / ps-test / skill-test
 ├── .shellcheckrc           # ShellCheck 配置
 ├── .gitattributes          # 跨平台行尾
+├── TASKS.md                # 唯一任务列表（带依据与验收标准）
 ├── README.md
 ├── CONTRIBUTING.md
 ├── CLAUDE.md
