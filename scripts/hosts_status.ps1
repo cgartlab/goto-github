@@ -1,13 +1,17 @@
-#Requires -Version 7.0
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Phase 4 verification + status for the goto-github skill (read-only).
 
 .DESCRIPTION
-    Re-samples the same 5 endpoints as connectivity_probe.ps1 and emits a
-    verdict. With -Baseline the verdict compares against the pre-repair
-    measurement, so "fixed" means "improved", not just "looks good now" (the
-    network is time-varying).
+    Re-samples the core endpoints via the shared lib/probe.ps1 and reports a
+    two-dimensional verdict:
+
+      network -- live sample plus an optional comparison against -Baseline
+      auth    -- passed through from auth_probe; an auth failure is NOT a
+                network failure and is never folded into the network verdict
+
+    PowerShell 5.1 compatible (Windows default) and 7+.
 
 .PARAMETER Attempts
     Samples per endpoint. Default 10; must match the baseline.
@@ -17,6 +21,9 @@
 
 .PARAMETER Baseline
     Previous connectivity_probe JSON output.
+
+.PARAMETER Help
+    Show this help.
 
 .EXAMPLE
     .\scripts\hosts_status.ps1 -Baseline .\before.json
@@ -31,57 +38,41 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$script:RepoRoot = Split-Path -Parent $PSScriptRoot
+
 $showHelp = {
     Write-Output @'
 Usage: hosts_status.ps1 [-Attempts N] [-Timeout SEC] [-Baseline FILE] [-Help]
 
 Phase 4 verification for the goto-github skill. Read-only.
 
-Re-samples the same 5 endpoints as connectivity_probe.ps1 and emits a verdict:
-  fixed          web crossed the threshold and git/api did not regress
-  partial        at least one endpoint improved, threshold not reached
-  not_fixed      no endpoint improved
+Re-samples every core endpoint and emits a verdict:
+  fixed          core endpoints meet their thresholds without regression
+  partial        at least one endpoint improved by >= 10 points, threshold not met
+  not_fixed      no endpoint improved / core paths below 50%
   not_installed  no goto-github marker block present
+
+Auth state (ssh / https) is reported as a separate dimension because an auth
+failure is not a network failure.
 
 Options:
   -Attempts N   samples per endpoint (default 10; must match the baseline)
   -Timeout SEC  connect timeout in seconds (default 5)
-  -Baseline F   previous connectivity_probe JSON output; the verdict is
-                computed against it (improvement, not just thresholds)
+  -Baseline F   previous connectivity_probe JSON output
 
-Environment:
-  HOSTS_FILE  hosts file path (default: %SystemRoot%\System32\drivers\etc\hosts)
-  PROBE_REPO  owner/repo for git/download endpoints
+Requires PowerShell 5.1+.
 '@
 }
 
 if ($Help) { & $showHelp; exit 0 }
 
-$script:RepoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'lib\constants.ps1')
+. (Join-Path $PSScriptRoot 'lib\endpoints.ps1')
+. (Join-Path $PSScriptRoot 'lib\probe.ps1')
 
-$script:HostsFile = $script:HOSTS_FILE
-$script:ProbeRepo = $script:PROBE_REPO
+$HostsFile = $script:HOSTS_FILE
 
-$script:Warnings = New-Object System.Collections.Generic.List[string]
-function Add-Warning {
-    param([string]$Message)
-    $script:Warnings.Add($Message) | Out-Null
-}
-
-function ConvertTo-JsonLiteral {
-    param([AllowNull()][AllowEmptyString()][string]$Value)
-    if ([string]::IsNullOrEmpty($Value)) { return 'null' }
-    $v = $Value.Replace('\', '\\').Replace('"', '\"')
-    $v = $v.Replace("`r", '').Replace("`n", '\n').Replace("`t", '\t')
-    return "`"$v`""
-}
-
-function Get-CurlPath {
-    try { return (Get-Command curl.exe -ErrorAction Stop).Source } catch { return $null }
-}
-
-# ── Thresholds (must match references/judgment-criteria.md) ──────────────────
+# -- Thresholds (must match references/judgment-criteria.md) ------------------
 $GIT_OK = 85
 $API_OK = 85
 $WEB_OK = 60
@@ -89,61 +80,11 @@ $WEB_OK = 60
 # baseline. Below this the difference is sampling noise, not a repair effect.
 $IMPROVE_MARGIN = 10
 
-# ── Endpoints (same order/shape as connectivity_probe.ps1) ───────────────────
-$endpoints = [ordered]@{
-    web       = 'https://github.com/'
-    api       = 'https://api.github.com/'
-    download  = "https://codeload.github.com/$script:ProbeRepo/tar.gz/refs/heads/main"
-    raw       = "https://raw.githubusercontent.com/$script:ProbeRepo/main/README.md"
-    git       = "https://github.com/$script:ProbeRepo/info/refs?service=git-upload-pack"
-}
-
-function Invoke-EndpointSample {
-    param([string]$Url, [string]$Key)
-
-    $curl = Get-CurlPath
-    if (-not $curl) {
-        Add-Warning "curl.exe not found; cannot probe $Key"
-        return @{ success = 0; fail = $Attempts; times = @() }
-    }
-
-    $times = New-Object System.Collections.Generic.List[double]
-    $ok = 0
-    $fail = 0
-
-    for ($i = 1; $i -le $Attempts; $i++) {
-        # --noproxy '*' is mandatory: probing through a proxy measures the
-        # proxy, not this machine's connectivity to GitHub.
-        $out = & $curl --noproxy '*' -s -o NUL `
-            --connect-timeout $Timeout --max-time ($Timeout + 2) `
-            -w '%{http_code},%{time_total}' "$Url" 2>$null
-        $rc = $LASTEXITCODE
-
-        $parts = "$out" -split ','
-        # Subexpression $(...), not `$x = if (...) {} else {}`: `if` is a
-        # statement, not an expression, so it cannot be assigned directly.
-        $code = $(if ($parts.Count -ge 1) { $parts[0] } else { '' })
-        $t = $(if ($parts.Count -ge 2) { $parts[1] } else { '' })
-
-        # rc=0 AND a real HTTP code. 000 = no response at all (connection
-        # failed / timeout / DNS failure) and must not count as success.
-        if ($rc -eq 0 -and $code -and $code -ne '000') {
-            $ok++
-            [double]$tv = 0
-            if ([double]::TryParse($t, [ref]$tv)) { $times.Add($tv) }
-        } else {
-            $fail++
-        }
-    }
-
-    return @{ success = $ok; fail = $fail; times = $times }
-}
-
-# ── Installed state ──────────────────────────────────────────────────────────
+# -- Installed state ----------------------------------------------------------
 $installed = $false
 $currentIp = $null
-if (Test-Path $script:HostsFile) {
-    $lines = [System.IO.File]::ReadAllLines($script:HostsFile)
+if (Test-Path $HostsFile) {
+    $lines = [System.IO.File]::ReadAllLines($HostsFile)
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -like "$($script:MARKER_START)*") {
             $installed = $true
@@ -159,116 +100,108 @@ if (Test-Path $script:HostsFile) {
     }
 }
 
-# ── Sample ───────────────────────────────────────────────────────────────────
+# -- Sample -------------------------------------------------------------------
 $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-$results = New-Object System.Collections.Generic.List[string]
+$endpointsJson = New-Object System.Collections.Generic.List[string]
 $rates = @{}
 
-foreach ($key in $endpoints.Keys) {
-    $url = $endpoints[$key]
-    Write-Verbose "probing $key ..."
-
-    $r = Invoke-EndpointSample -Url $url -Key $key
+foreach ($ep in (Get-Endpoints -Scope 'fast')) {
+    Write-Verbose "probing $($ep.Key) ..."
+    $r = Invoke-EndpointProbe -Url $ep.Url -Kind $ep.Kind -Attempts $Attempts -Timeout $Timeout
     $rate = [int][math]::Round(($r.success / $Attempts) * 100)
-    $rates[$key] = $rate
-
-    if ($r.times.Count -gt 0) {
-        $stats = $r.times | Measure-Object -Minimum -Maximum -Average
-        # Concatenation, not -f: the JSON braces would be parsed as format
-        # placeholders ("Input string was not in a correct format").
-        $lat = '{'
-        $lat += '"min":' + [math]::Round($stats.Minimum, 3) + ','
-        $lat += '"max":' + [math]::Round($stats.Maximum, 3) + ','
-        $lat += '"avg":' + [math]::Round($stats.Average, 3)
-        $lat += '}'
-    } else {
-        # Zero successes: latency is unknown, not zero.
-        $lat = 'null'
-    }
+    $rates[$ep.Key] = $rate
+    $lat = ConvertTo-LatencyJson -ProbeResult $r
 
     $obj = '{'
-    $obj += '"key":"' + $key + '",'
-    $obj += '"url":' + (ConvertTo-JsonLiteral $url) + ','
+    $obj += '"key":' + (ConvertTo-JsonLiteral $ep.Key) + ','
+    $obj += '"url":' + (ConvertTo-JsonLiteral $ep.Url) + ','
+    $obj += '"group":' + (ConvertTo-JsonLiteral $ep.Group) + ','
+    $obj += '"kind":' + (ConvertTo-JsonLiteral $ep.Kind) + ','
     $obj += '"success":' + $r.success + ','
     $obj += '"fail":' + $r.fail + ','
     $obj += '"rate":' + $rate + ','
     $obj += '"latency":' + $lat
     $obj += '}'
-    $results.Add($obj)
+    $endpointsJson.Add($obj)
 }
 
-# ── Verdict ──────────────────────────────────────────────────────────────────
+# -- Network verdict ----------------------------------------------------------
 $verdict = 'not_fixed'
+$warnings = New-Object System.Collections.Generic.List[string]
+
+function Get-Rate {
+    param([string]$Key)
+    if ($rates.ContainsKey($Key)) { return [int]$rates[$Key] }
+    return 0
+}
 
 if (-not $installed) {
     $verdict = 'not_installed'
 } else {
-    $webRate = $rates['web']
-    $gitRate = $rates['git']
-    $apiRate = $rates['api']
+    $webRate = Get-Rate 'web'
+    $apiRate = Get-Rate 'api'
+    $gitReadRate = Get-Rate 'git_read'
 
     if ($Baseline -and (Test-Path $Baseline)) {
-        # Compare against the pre-repair measurement: "fixed" must mean
-        # improvement, not just a good absolute number.
-        $baseRaw = Get-Content $Baseline -Raw
-        $base = $baseRaw | ConvertFrom-Json
-
+        $base = Get-Content $Baseline -Raw | ConvertFrom-Json
         $baseRates = @{}
         foreach ($e in $base.endpoints) { $baseRates[$e.key] = [int]$e.rate }
 
-        # Noise floor: a 1-point wobble is not an improvement. The network is
-        # time-varying enough that 99% -> 100% happens by chance; counting that
-        # as "the repair helped" is exactly the false positive this baseline
-        # comparison exists to prevent.
+        # Noise floor: a 1-point wobble is not an improvement.
         $improved = 0
-        foreach ($k in 'web', 'git', 'api') {
-            if ($baseRates.ContainsKey($k) -and ($rates[$k] - $baseRates[$k]) -ge $IMPROVE_MARGIN) {
+        foreach ($k in 'web', 'api', 'git_read') {
+            if ($baseRates.ContainsKey($k) -and ((Get-Rate $k) - $baseRates[$k]) -ge $IMPROVE_MARGIN) {
                 $improved++
             }
         }
 
-        if ($webRate -ge $WEB_OK -and $improved -gt 0 -and $gitRate -ge $GIT_OK -and $apiRate -ge $API_OK) {
+        if ($improved -gt 0 -and $gitReadRate -ge $GIT_OK -and $apiRate -ge $API_OK) {
             $verdict = 'fixed'
         } elseif ($improved -gt 0) {
             $verdict = 'partial'
-            Add-Warning 'some endpoints improved but the thresholds were not reached'
+            $warnings.Add('some endpoints improved but the core thresholds were not reached')
         } else {
             $verdict = 'not_fixed'
-            Add-Warning 'no endpoint improved over the baseline; the hosts change did not help'
+            $warnings.Add('no endpoint improved over the baseline; the hosts change did not help')
         }
 
-        if ($gitRate -lt $GIT_OK -or $apiRate -lt $API_OK) {
-            Add-Warning 'git or api endpoint is below threshold; the hosts entry may be shadowed or the IP is dead'
+        if ($gitReadRate -lt $GIT_OK -or $apiRate -lt $API_OK) {
+            $warnings.Add('git_read or api is below threshold; the hosts entry may be shadowed or the IP is dead')
         }
     } else {
         # No baseline: threshold-only verdict, and say so.
-        if ($webRate -ge $WEB_OK -and $gitRate -ge $GIT_OK -and $apiRate -ge $API_OK) {
+        if ($gitReadRate -ge $GIT_OK -and $apiRate -ge $API_OK) {
             $verdict = 'fixed'
-            Add-Warning 'verdict based on thresholds only (no -Baseline supplied); the network is time-varying so this does not prove the repair caused it'
-        } elseif ($webRate -ge $WEB_OK) {
+            $warnings.Add('verdict based on thresholds only (no -Baseline supplied); the network is time-varying so this does not prove the repair caused it')
+        } elseif ($gitReadRate -ge 50 -or $apiRate -ge 50) {
             $verdict = 'partial'
-            Add-Warning 'web endpoint is healthy but git/api are below threshold'
+            $warnings.Add('git_read or api is between 50% and the threshold; partially working')
         } else {
             $verdict = 'not_fixed'
-            Add-Warning "web endpoint is still below the ${WEB_OK}% threshold"
+            $warnings.Add('git_read and api are both below 50%; hosts cannot fix this - a proxy is required')
         }
+    }
+
+    if ($webRate -lt $WEB_OK) {
+        $warnings.Add("web front page is at $webRate% (below $WEB_OK%); browsing is degraded but CLI paths may be fine")
     }
 }
 
-if ($Attempts -lt 5) {
-    Add-Warning "sample_size is $Attempts (below 5); the success rate is not statistically meaningful"
-}
+# -- Auth dimension (independent of network) ----------------------------------
+$authSsh = if ($env:SSH_AUTH_STATE) { $env:SSH_AUTH_STATE } else { 'unknown' }
+$authHttps = if ($env:HTTPS_AUTH_STATE) { $env:HTTPS_AUTH_STATE } else { 'unknown' }
 
-# ── Emit ─────────────────────────────────────────────────────────────────────
-$warnJson = if ($script:Warnings.Count -eq 0) { '[]' } else { '[' + (($script:Warnings | ForEach-Object { ConvertTo-JsonLiteral $_ }) -join ',') + ']' }
+# -- Emit ---------------------------------------------------------------------
+$warnJson = if ($warnings.Count -eq 0) { '[]' } else { '[' + (($warnings | ForEach-Object { ConvertTo-JsonLiteral $_ }) -join ',') + ']' }
 
 $json = '{'
 $json += '"timestamp":"' + $timestamp + '",'
 $json += '"installed":' + $installed.ToString().ToLower() + ','
 $json += '"current_ip":' + (ConvertTo-JsonLiteral $currentIp) + ','
-$json += '"endpoints":[' + ($results -join ',') + '],'
+$json += '"endpoints":[' + ($endpointsJson -join ',') + '],'
 $json += '"verdict":"' + $verdict + '",'
-$json += '"warnings":' + $warnJson
+$json += '"auth":{"ssh":"' + $authSsh + '","https":"' + $authHttps + '"}'
+$json += ',"warnings":' + $warnJson
 $json += '}'
 
 [Console]::Out.Write($json)

@@ -13,6 +13,7 @@ on:
       - '*.ps1'
       - 'ps1/**'
       - 'tests/**'
+      - 'evals/**'
       - 'SKILL.md'
       - 'references/**'
       - 'Makefile'
@@ -27,6 +28,7 @@ on:
       - '*.ps1'
       - 'ps1/**'
       - 'tests/**'
+      - 'evals/**'
       - 'SKILL.md'
       - 'references/**'
       - 'Makefile'
@@ -96,6 +98,8 @@ jobs:
           [ "$missing" -ne 0 ] && exit 1
           echo "SKILL.md frontmatter OK."
 
+      - name: Run skill end-to-end (all five phases)
+        run: bash evals/run_e2e.sh
       - name: Run skill smoke evals
         run: bash evals/run_smoke.sh
 
@@ -181,7 +185,16 @@ jobs:
           $out = & pwsh -NoProfile -File scripts\connectivity_probe.ps1 -Attempts 3 -Timeout 4
           if ($LASTEXITCODE -ne 0) { $fail = 1 }
           $probe = $out | ConvertFrom-Json
-          if ($probe.endpoints.Count -ne 5) { Write-Host "  expected 5 endpoints"; $fail = 1 }
+          # 10 core endpoints as of the full-service-surface change; assert the
+          # count AND that the paths that used to be untested are present.
+          if ($probe.endpoints.Count -lt 10) {
+            Write-Host "  expected >= 10 endpoints, got $($probe.endpoints.Count)"; $fail = 1
+          }
+          foreach ($k in 'git_read', 'git_write', 'ssh22', 'ssh443') {
+            if (-not ($probe.endpoints | Where-Object { $_.key -eq $k })) {
+              Write-Host "  missing endpoint: $k"; $fail = 1
+            }
+          }
 
           Write-Host "== hosts_apply.ps1 (forced IP, temp hosts) =="
           $out = & pwsh -NoProfile -File scripts\hosts_apply.ps1 -Strategy priority
@@ -206,3 +219,87 @@ jobs:
           Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
           if ($fail -ne 0) { Write-Host "Skill script tests FAILED"; exit 1 }
           Write-Host "Skill script tests passed."
+  # Cross-platform acceptance: the skill must work on all three target OSes.
+  # Runs the five phases end-to-end plus the bash 3.2 / PS 5.1 compatibility
+  # checks on each. This is the job that proves the "works everywhere" claim.
+  cross-platform:
+    name: Skill e2e (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show runtime versions
+        run: |
+          echo "OS:  $(uname -a)"
+          echo "bash: $BASH_VERSION"
+          if command -v pwsh >/dev/null 2>&1; then pwsh -NoProfile -Command '$PSVersionTable.PSVersion'; fi
+          if command -v powershell >/dev/null 2>&1; then powershell -NoProfile -Command '$PSVersionTable.PSVersion'; fi
+
+      - name: Check .sh line endings (CRLF breaks the shebang)
+        run: |
+          fail=0
+          for f in scripts/*.sh scripts/lib/*.sh evals/*.sh lib/*.sh tests/*.sh; do
+            [ -f "$f" ] || continue
+            if head -c 4000 "$f" | grep -q $'\r'; then
+              echo "CRLF in $f"; fail=1
+            fi
+          done
+          [ $fail -ne 0 ] && exit 1
+          echo "all .sh are LF"
+
+      - name: Check no nested heredoc (bash 3.2 cannot parse it)
+        run: |
+          # printf '%s' "$(cat <<EOF ... EOF)" breaks bash 3.2 parsing: the
+          # heredoc is truncated and later case labels shift, producing a
+          # syntax error at an unrelated line. bash -n on 5.x does not catch it.
+          fail=0
+          for f in scripts/*.sh scripts/lib/*.sh; do
+            [ -f "$f" ] || continue
+            while IFS= read -r line; do
+              case "$line" in
+                \#*) continue ;;
+              esac
+              case "$line" in
+                *'$('*'<<EOF'*|*'$('*"<<'EOF'"*)
+                  echo "nested heredoc in $f: $line"; fail=1 ;;
+              esac
+            done < "$f"
+          done
+          [ $fail -ne 0 ] && exit 1
+          echo "no nested heredocs"
+      - name: Check bash 3.2 compatibility (macOS default)
+        run: |
+          fail=0
+          hits=$(grep -rnE 'declare -A|local -A|typeset -A|\bmapfile\b|\breadarray\b|local -n|declare -n' \
+                 scripts/*.sh scripts/lib/*.sh 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#') || true
+          if [ -n "$hits" ]; then echo "$hits"; fail=1; fi
+          [ $fail -ne 0 ] && exit 1
+          echo "no bash 4+ constructs found"
+
+      - name: Check .ps1 is ASCII or BOM-prefixed (PS 5.1 encoding)
+        run: |
+          fail=0
+          for f in scripts/*.ps1 scripts/lib/*.ps1; do
+            [ -f "$f" ] || continue
+            if LC_ALL=C grep -qP '[\x80-\xFF]' "$f" 2>/dev/null; then
+              bom=$(head -c 3 "$f" | od -An -tx1 | tr -d ' \n')
+              if [ "$bom" != "efbbbf" ]; then
+                echo "non-ASCII without BOM: $f (PS 5.1 will misdecode)"; fail=1
+              fi
+            fi
+          done
+          [ $fail -ne 0 ] && exit 1
+          echo "all .ps1 are ASCII or BOM-prefixed"
+
+      - name: Run five-phase end-to-end
+        run: bash evals/run_e2e.sh
+
+      - name: Run smoke evals
+        run: SKIP_NETWORK=1 bash evals/run_smoke.sh

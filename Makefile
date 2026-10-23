@@ -1,4 +1,4 @@
-.PHONY: lint test parity ps-test skill-test
+.PHONY: lint test parity ps-test skill-test e2e
 
 # shellcheck at warning severity (matches CI). Style/info findings are not
 # gating; warnings (e.g. unused variables, quoting) are.
@@ -47,3 +47,8 @@ skill-test:
 	done; \
 	if [ "$$fail" -ne 0 ]; then echo "Skill script --help FAILED"; exit 1; fi; \
 	echo "Skill scripts OK."
+
+# End-to-end: run all five phases on this platform, bash and PowerShell paths.
+# Works offline (Phase 3 uses GOTO_GITHUB_FORCE_IP against a temp hosts file).
+e2e:
+	@bash evals/run_e2e.sh

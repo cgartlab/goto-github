@@ -100,26 +100,55 @@ json_escape() {
 backup_hosts() {
     local backup
     backup="${HOSTS_FILE}.goto-github.bak.$(date +%Y%m%d%H%M%S)"
-    if ! cp -p "$HOSTS_FILE" "$backup" 2>/dev/null && ! cp "$HOSTS_FILE" "$backup" 2>/dev/null; then
-        add_warning "backup failed; aborting without touching hosts"
-        return 1
+    # cp -p may fail on filesystems that cannot preserve metadata (macOS APFS
+    # with restricted dirs, Git Bash on NTFS). Fall back to plain cp; only if
+    # BOTH fail is the backup considered failed.
+    if ! cp -p "$HOSTS_FILE" "$backup" 2>/dev/null; then
+        if ! cp "$HOSTS_FILE" "$backup" 2>/dev/null; then
+            add_warning "backup failed (cannot write ${backup}); aborting without touching hosts"
+            return 1
+        fi
     fi
-    # Prune older backups (ls -1t sorts by mtime; keep newest KEEP_BACKUPS)
-    # shellcheck disable=SC2012
-    ls -1t "${HOSTS_FILE}.goto-github.bak."* 2>/dev/null | tail -n +"$((KEEP_BACKUPS + 1))" \
-        | while IFS= read -r old; do rm -f "$old"; done
+    # Prune older backups. The pipeline's exit status is deliberately ignored:
+    # with `set -o pipefail`, `ls` returns non-zero when the glob matches
+    # nothing, and that status would leak into this function's return value
+    # (the caller reads stdout, so a non-zero exit would drop the backup path).
+    {
+        # shellcheck disable=SC2012
+        ls -1t "${HOSTS_FILE}.goto-github.bak."* 2>/dev/null \
+            | tail -n +"$((KEEP_BACKUPS + 1))" \
+            | while IFS= read -r old; do rm -f "$old"; done
+    } 2>/dev/null || true
     printf '%s\n' "$backup"
+    return 0
 }
+
+# ── Platform predicates ──────────────────────────────────────────────────────
+# Defined before first use: write_hosts_block() below calls is_macos().
+is_macos() { [ "$(uname)" = "Darwin" ]; }
+is_linux() { [ "$(uname)" = "Linux" ]; }
 
 # Strip any existing block, append the new one. Atomic via temp + mv.
 # Preserves permissions (macOS stat -f %Lp, GNU stat -c %a).
 write_hosts_block() {
     local ip="$1"
     local tmp_file perms
-    tmp_file=$(mktemp "${HOSTS_FILE}.XXXXXXXX") || {
+
+    # BSD mktemp (macOS) rejects a template whose Xs are not the final
+    # characters, and behaves differently with paths containing dots. Build the
+    # template so it is always "<dir>/<name>.XXXXXXXX" with the Xs last, and
+    # fall back to a plain mktemp if that still fails.
+    local hosts_dir hosts_base
+    hosts_dir=$(dirname "$HOSTS_FILE")
+    hosts_base=$(basename "$HOSTS_FILE")
+    tmp_file=$(mktemp "${hosts_dir}/${hosts_base}.XXXXXXXX" 2>/dev/null) \
+        || tmp_file=$(mktemp "${hosts_dir}/.goto-github.XXXXXXXX" 2>/dev/null) \
+        || tmp_file=$(mktemp 2>/dev/null)
+
+    if [ -z "$tmp_file" ]; then
         add_warning "failed to create temp file; hosts unchanged"
         return 1
-    }
+    fi
 
     # Remove any previous block (idempotency), keep every other line
     sed "/^${MARKER_START}/,/^${MARKER_END}$/d" "$HOSTS_FILE" > "$tmp_file"
@@ -155,8 +184,6 @@ write_hosts_block() {
     fi
     return 0
 }
-
-is_macos() { [ "$(uname)" = "Darwin" ]; }
 
 flush_dns_cache() {
     if is_macos; then
@@ -304,7 +331,14 @@ try_cidr_scan() {
 
     [ "${#pool[@]}" -eq 0 ] && return 1
 
-    winner=$(for cand in "${pool[@]}"; do
+    # Scan sequentially, keeping the first hit. The previous version used
+    # `winner=$(for ...; do ...; done | head -1)`. bash 3.2 (macOS default)
+    # cannot parse a `case` inside a command substitution inside a for-loop
+    # whose output is piped — it reports "syntax error near unexpected token
+    # ';;'" at the case label, pointing at a line that is perfectly valid.
+    # A plain loop with an explicit break avoids the construct entirely.
+    winner=""
+    for cand in "${pool[@]}"; do
         code=$(curl --noproxy '*' -s -o /dev/null \
             --connect-timeout 2 --max-time 5 \
             -w '%{http_code}' \
@@ -312,9 +346,12 @@ try_cidr_scan() {
             "$GIT_PROBE_TARGET" \
             --resolve "github.com:443:${cand}" 2>/dev/null || true)
         case "$code" in
-            2*) echo "$cand" ;;
+            2*)
+                winner="$cand"
+                break
+                ;;
         esac
-    done | head -1)
+    done
 
     if [ -n "$winner" ]; then
         echo "$winner"
@@ -356,89 +393,69 @@ if [ -n "${GOTO_GITHUB_FORCE_IP:-}" ]; then
     ip="$GOTO_GITHUB_FORCE_IP"
     used_strategy="\"forced\""
 fi
+# ---- Result emission -------------------------------------------------------
+# One function for every exit path. The previous version inlined
+# `printf '%s' "$(cat <<EOF ... EOF)"` four times; bash 3.2 (macOS default)
+# mis-parses a heredoc nested inside a command substitution, which produced
+#   line 342: syntax error near unexpected token `;;'
+# at an unrelated line and made hosts_apply die before writing anything.
+# Plain string concatenation has no such ambiguity.
+emit_result() {
+    local applied="$1" ipv="$2" entries="$3" backup="$4" dns="$5"
+    local warn_json="" first=1 w
 
-if [ -z "$ip" ]; then
-    add_warning "no working GitHub IP found via strategy '$STRATEGY'"
-    warn_json="["
-    first=1
-    for w in "${warnings[@]}"; do
+    for w in ${warnings[@]+"${warnings[@]}"}; do
         [ $first -eq 0 ] && warn_json+=","
         warn_json+="\"$(json_escape "$w")\""
         first=0
     done
-    warn_json+="]"
-    printf '%s\n' "$(cat <<EOF
-{"applied":false,"strategy":$used_strategy,"ip":null,"entries_written":0,"backup":null,"shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":false,"warnings":$warn_json}
-EOF
-)"
+    warn_json="[$warn_json]"
+
+    local ip_json="null"
+    [ -n "$ipv" ] && ip_json="\"$ipv\""
+
+    local backup_json="null"
+    [ -n "$backup" ] && backup_json="\"$(json_escape "$backup")\""
+
+    printf '{"applied":%s,"strategy":%s,"ip":%s,"entries_written":%s,"backup":%s,"shadowing":{"checked":true,"found":%s,"detail":%s},"dns_flushed":%s,"warnings":%s}\n' \
+        "$applied" "$used_strategy" "$ip_json" "$entries" "$backup_json" \
+        "$shadow_found" "$shadow_detail" "$dns" "$warn_json"
+}
+
+if [ -z "$ip" ]; then
+    add_warning "no working GitHub IP found via strategy '$STRATEGY'"
+    emit_result "false" "" "0" "" "false"
     exit 1
 fi
 
 echo "  selected IP: $ip (strategy: $used_strategy)" >&2
 
-# ── Build the block and write ────────────────────────────────────────────────
+# ---- Backup then write -----------------------------------------------------
 backup_result=$(backup_hosts) || {
-    warn_json="["
-    first=1
-    for w in "${warnings[@]}"; do
-        [ $first -eq 0 ] && warn_json+=","
-        warn_json+="\"$(json_escape "$w")\""
-        first=0
-    done
-    warn_json+="]"
-    printf '%s\n' "$(cat <<EOF
-{"applied":false,"strategy":$used_strategy,"ip":"$ip","entries_written":0,"backup":null,"shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":false,"warnings":$warn_json}
-EOF
-)"
+    emit_result "false" "$ip" "0" "" "false"
     exit 1
 }
 
 if ! write_hosts_block "$ip"; then
-    warn_json="["
-    first=1
-    for w in "${warnings[@]}"; do
-        [ $first -eq 0 ] && warn_json+=","
-        warn_json+="\"$(json_escape "$w")\""
-        first=0
-    done
-    warn_json+="]"
-    printf '%s\n' "$(cat <<EOF
-{"applied":false,"strategy":$used_strategy,"ip":"$ip","entries_written":0,"backup":"$(json_escape "$backup_result")","shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":false,"warnings":$warn_json}
-EOF
-)"
+    emit_result "false" "$ip" "0" "$backup_result" "false"
     exit 1
 fi
-
-backup_path="$backup_result"
-# Escape for JSON: Windows paths carry backslashes, which are escape
-# characters in JSON strings. Unescaped they make the whole line unparseable
-# (ConvertFrom-Json: "Unrecognized escape sequence").
-backup_path_json="$(json_escape "$backup_path")"
 
 # Count entries actually written inside the marker block
 entries=$(sed -n "/^${MARKER_START}/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
     | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+case "$entries" in
+    ''|*[!0-9]*) entries=0 ;;
+esac
 
-# ── Shadowing check (after) ──────────────────────────────────────────────────
+# ---- Shadowing check (after) ----------------------------------------------
 check_shadowing_detail || true
 
-# ── DNS flush ────────────────────────────────────────────────────────────────
+# ---- DNS flush -------------------------------------------------------------
 dns_flushed="true"
 if ! flush_dns_cache >/dev/null 2>&1; then
     dns_flushed="false"
     add_warning "DNS cache flush failed; hosts is written but cached entries may persist"
 fi
 
-warn_json="["
-first=1
-for w in "${warnings[@]}"; do
-    [ $first -eq 0 ] && warn_json+=","
-    warn_json+="\"$(json_escape "$w")\""
-    first=0
-done
-warn_json+="]"
-
-printf '%s\n' "$(cat <<EOF
-{"applied":true,"strategy":$used_strategy,"ip":"$ip","entries_written":$entries,"backup":"$backup_path_json","shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":$dns_flushed,"warnings":$warn_json}
-EOF
-)"
+emit_result "true" "$ip" "$entries" "$backup_result" "$dns_flushed"
