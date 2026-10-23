@@ -12,7 +12,7 @@
 
 ## 低优先级
 
-### T5. `ps1/` 与根 `goto-github.ps1` 的长期去留
+### T5. `ps1/` 与根 `goto-github.ps1` 的长期去留 → [issue #61](https://github.com/cgartlab/goto-github/issues/61)
 
 **依据**：两套 PowerShell 实现并存且互斥（同一份 hosts 标记、不兼容的 CLI）。
 
