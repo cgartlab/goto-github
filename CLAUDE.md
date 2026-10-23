@@ -177,6 +177,7 @@ goto-github/
 │   ├── shellcheck.yml      # Lint + 测试 + parity CI
 │   ├── argus-review.yml    # AI review CI
 │   └── pr-automation.yml   # PR 自动化（标签/assign）
+├── TASKS.md                # 唯一任务列表（带依据与验收标准）
 ├── README.md
 ├── CONTRIBUTING.md
 ├── CLAUDE.md

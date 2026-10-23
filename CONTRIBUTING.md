@@ -50,11 +50,15 @@ cd goto-github
 
 ## PR 流程
 
-1. 从 `main` 创建分支：`git switch -c dev-<feature>`
+0. **先看 `TASKS.md`**：仓库的唯一任务列表。要做的改动若对应其中一条，按它的验收标准收尾；若是新需求，先在 TASKS.md 补一条（带依据与验收标准）再动手
+1. 从 `main` 创建分支，命名必须匹配服务端规则之一：
+   `feat/<scope>-<desc>` · `fix/<scope>-<desc>` · `docs/<desc>` ·
+   `chore/<scope>-<desc>` · `release/v<semver>`
+   （`dev-*`、`feature/*`、`hotfix/*` 会被 push 拒绝）
 2. 开发并提交
-3. 确保 `make lint`（shellcheck 0 warnings）、`make test`、`make parity`、`make skill-test` 通过；改到 `ps1/` 时再加 `make ps-test`（仅 Windows）
-4. 创建 PR 指向 `main`
-5. 合并后删除分支
+3. 确保 `make lint`（shellcheck 0 warnings）、`make test`、`make parity`、`make skill-test`、`make e2e` 通过；改到 `ps1/` 时再加 `make ps-test`（仅 Windows）
+4. 创建 PR 指向 `main`，模板里的「已知问题 / 后续 TODO」要与 TASKS.md 一致
+5. 合并后删除分支，并把 TASKS.md 中已完成的条目移到「近期完成」
 
 ## 改 skill 脚本的额外要求
 
@@ -93,6 +97,7 @@ goto-github/
 ├── Makefile                # make lint / test / parity / ps-test / skill-test
 ├── .shellcheckrc          # ShellCheck 配置
 ├── .gitattributes          # 跨平台行尾
+├── TASKS.md                # 唯一任务列表（带依据与验收标准）
 ├── README.md
 ├── CONTRIBUTING.md
 ├── CLAUDE.md
