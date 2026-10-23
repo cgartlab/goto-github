@@ -61,17 +61,20 @@ Phase 0/1/3/4 调用的脚本的字段语义。SKILL.md 不复述这些字段。
 
 ```json
 {
-  "timestamp": "2026-10-20T12:00:00Z",
+  "timestamp": "2026-10-23T12:00:00Z",
   "proxy_bypassed": true,
   "attempts": 10,
+  "scope": "fast",
   "endpoints": [
     {
-      "key": "web | api | download | raw | git",
-      "url": "https://github.com/",
-      "success": 6,
-      "fail": 4,
-      "rate": 60,
-      "latency": { "min": 0.89, "max": 4.04, "avg": 2.29 }
+      "key": "git_read",
+      "url": "https://github.com/.../info/refs?service=git-upload-pack",
+      "group": "git",
+      "kind": "git-smart",
+      "success": 10,
+      "fail": 0,
+      "rate": 100,
+      "latency": { "min": 0.59, "max": 0.60, "avg": 0.60 }
     }
   ],
   "warnings": []
@@ -82,17 +85,51 @@ Phase 0/1/3/4 调用的脚本的字段语义。SKILL.md 不复述这些字段。
 
 | 字段 | 语义 |
 |---|---|
-| `proxy_bypassed` | 必须为 `true`。为 `false` 说明探测走了代理，结论不可用于判定——加 `warnings[]` 说明。 |
-| `attempts` | 每端点采样次数。复测必须与首测一致，否则不可比。 |
-| `success` | 拿到真实 HTTP 状态码的次数。**`000`（无响应）不算成功**——hosts 指向死 IP 时 curl 也可能返回 000。 |
-| `rate` | `success / attempts * 100`，整数百分比。 |
-| `latency` | 仅统计成功的请求，单位秒。全失败时为 `null`。 |
+| `proxy_bypassed` | 必须为 `true`。为 `false` 说明探测走了代理，结论不可用于判定 |
+| `attempts` | 每端点采样次数。复测必须与首测一致，否则不可比 |
+| `scope` | `fast`（默认）或 `all`；决定 endpoint 集合 |
+| `group` | `web`/`api`/`git`/`raw`/`download`/`assets`/`ssh`/`registry` |
+| `kind` | `http` / `git-smart` / `tcp`。决定探测方式，不要凭名字猜 |
+| `success` | 拿到真实 HTTP 状态码的次数（`tcp` 类为 TCP 握手成功次数）。**`000`（无响应）不算成功** |
+| `rate` | `success / attempts * 100`，整数百分比 |
+| `latency` | 仅统计成功的请求，单位秒。全失败时为 `null` |
 
 ### 已知陷阱
 
-- **`http_code` 为 `000` 不是成功**：curl 在连接失败/超时/DNS 失败时输出 `000`。必须显式排除。实测中把 000 计入成功会让"完全不通"显示成"100% 可用"。
+- **`http_code` 为 `000` 不是成功**：curl 在连接失败/超时/DNS 失败时输出 `000`。必须显式排除。把它计入成功会让"完全不通"显示成"100% 可用"。
 - **单端点 `success` 为 0 时 `latency` 必须是 `null`**，不是 `{min:0,max:0,avg:0}`。
-- **采样必须串行到并发可控**：5 端点 × 10 次全并发会造成自干扰（本机带宽/连接数竞争），测出的延迟虚高。每端点内部可并发（这是测端点容量），端点之间串行。
+- **`git-smart` 端点必须带 Accept 头**：`application/x-git-upload-pack-advertisement`。不带时 GitHub 的响应不同，测的就不是 git 路径。
+- **`tcp` 端点用 `telnet://` 或 socket 握手**，不能用 HTTP 状态码。curl 的 `time_connect` 非零即表示握手完成；退出码非零是 peer 在握手后关闭，不算失败。
+- **bash 循环里跑 curl 会吞 stdin**：`while read < <(...)` 的循环体里 curl 继承 stdin 并消费剩余行（实测 10 个端点变 9 个）。用 `exec 3< <(...)` + `read <&3`。
+
+## auth_probe — 凭据状态（Phase 1b）
+
+```json
+{
+  "ssh":   { "state": "auth-fail", "detail": "transport OK but the key is not authorized on any GitHub account" },
+  "https": { "state": "ok",        "detail": "gh token has push permission on cgartlab/goto-github" },
+  "gh":    { "state": "keyring_ok","warning": null },
+  "warnings": ["SSH reaches GitHub but the key is not registered; use HTTPS or add the key to GitHub"]
+}
+```
+
+### 字段语义
+
+| 字段 | 取值 | 判定依据 |
+|---|---|---|
+| `ssh.state` | `transport-ok` | 输出含 `successfully authenticated` |
+| | `auth-fail` | 输出含 `Permission denied (publickey)` — **传输已通** |
+| | `blocked` | 输出含 `Connection refused` / `timed out` / `unreachable` |
+| | `no-key` | `~/.ssh` 无私钥且 ssh-agent 未运行 |
+| `https.state` | `ok` | helper 可用且 `gh api .../permissions.push` 为 `true` |
+| | `permission-denied` | token 有效但 `push` 为 `false` |
+| | `no-credentials` | 无 helper，或 gh 无可用 token |
+| `gh.state` | `keyring_ok` | gh api 成功 |
+| | `env_var_shadowed` | `GITHUB_TOKEN` 存在但失效 |
+
+**`auth-fail` 与 `blocked` 必须区分**：前者说明 TCP/TLS/密钥交换全成功、只是密钥没注册；后者说明根本连不上。混为一谈会让用户去修网络或去换密钥，方向都是错的。
+
+**检查顺序不能反**：先看有没有密钥文件，再跑 `ssh -T`。没有密钥时 `ssh -T` 同样返回 `Permission denied (publickey)`，与"密钥未授权"无法区分。
 
 ## hosts_apply — 写入 hosts（Phase 3）
 

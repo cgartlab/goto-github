@@ -69,35 +69,69 @@ Phase 0 环境探测（env_detection）
    └─ env_var_shadowed            → 记入报告，不影响后续探测
    |
 Phase 1 连通性采样（connectivity_probe）
-   └─ 5 端点 × N 次（默认 10），--noproxy 强制绕代理
+   └─ 10 端点 × N 次（默认 10），--noproxy 强制绕代理
+      web / api / git_read / git_write / raw / gist / download / assets
+      ssh22 / ssh443（--scope all 追加 registry 与 assets 组）
+   |
+Phase 1b 凭据探测（auth_probe）
+   └─ ssh / https / gh 三路凭据状态，与网络维度分开
    |
 Phase 2 判定（judgment-criteria.md）
-   ├─ direct_ok（git/API 高成功率）      → 跳 Phase 3，直接报告
-   ├─ hosts_needed（git 可用但网页退化） → Phase 3 修复
-   └─ proxy_needed（全端点都低）         → 建议代理，不建议 hosts
+   ├─ network: direct_ok / hosts_needed / partial / proxy_needed
+   └─ auth:    ok / ssh-only-failed / permission-denied
    |
 Phase 3 修复（hosts_apply：优先级 IP → 社区源 → CIDR 扫描）
-   ├─ 备份 → 写标记块 → 遮蔽检测 → 刷新 DNS
-   └─ hosts_status 验证（复测 Phase 1 同端点）
+   └─ 备份 → 写标记块 → 遮蔽检测 → 刷新 DNS
    |
-Phase 4 报告（含"是否已修复"判定 + warnings[]）
+Phase 4 报告（hosts_status：网络 verdict + auth 维度 + warnings[]）
 ```
+
+## Phase 1b — 凭据探测
+
+`auth_probe` 回答的是"我有没有这条路径需要的凭据"，**不是**"网络通不通"。两者必须分开：一次失败的 `git push` 至少有四种原因（没密钥 / 密钥没授权 / 没 HTTPS 凭据 / 没写权限），纯连通性探测会把它们全报成"FAIL"，把用户引向修网络这个错误方向。
+
+三路状态：
+
+| 路径 | 状态 | 含义 |
+|---|---|---|
+| `ssh` | `transport-ok` | 密钥已授权 |
+| | `auth-fail` | **传输正常**，密钥未在任何 GitHub 账号注册 |
+| | `blocked` | 端口被封 |
+| | `no-key` | 本机无密钥且 ssh-agent 未运行 |
+| `https` | `ok` | credential helper 可用且有 push 权限 |
+| | `permission-denied` | 凭据有效但无写权限 |
+| | `no-credentials` | 无 credential helper |
+| `gh` | `keyring_ok` / `env_var_shadowed` / `none` | 同 Phase 0，此处复核 |
+
+`auth-fail` 是实践中最常见的误判源：本机实测 `ssh -T` 返回 `Permission denied (publickey)`，而 `github.com:22` 与 `ssh.github.com:443` 都 TCP 可达——这不是网络问题。
 
 ## Phase 1 — 连通性采样
 
-调用 `connectivity_probe.{sh,ps1}`，采 5 个端点。**每个端点多次采样**（默认 10 次，`--attempts` 可调），输出成功率与 min/max/avg 延迟：
+调用 `connectivity_probe.{sh,ps1}`。**每个端点多次采样**（默认 10 次，`--attempts` 可调），输出成功率与 min/max/avg 延迟。
+
+端点清单（`scripts/lib/endpoints.{sh,ps1}` 是唯一真源）：
 
 | 端点 | 测什么 |
 |---|---|
-| `github.com/` | 网页前端 |
-| `api.github.com` | REST API（`gh` 走这条） |
-| `codeload.github.com` | tarball/zip 下载 |
-| `raw.githubusercontent.com` | raw 文件 |
-| `github.com info/refs` | git smart-HTTP 协议（clone/fetch/push 走这条） |
+| `web` | github.com 前端 |
+| `api` | REST API（`gh` 走这条） |
+| `git_read` | git smart-http `upload-pack`（clone / fetch） |
+| `git_write` | git smart-http `receive-pack`（**push**，与读路径独立失效） |
+| `raw` | raw.githubusercontent.com |
+| `gist` | gist.githubusercontent.com |
+| `download` | codeload.github.com（tarball / zip） |
+| `assets` | github.githubassets.com |
+| `ssh22` | tcp://github.com:22（传输层） |
+| `ssh443` | tcp://ssh.github.com:443（22 被封时的备用） |
+| `--scope all` 追加 | ghcr / npm.pkg / maven.pkg / avatars / objects / pages |
 
-**为什么要绕代理**：探测必须加 `--noproxy '*'`（curl）或清空代理配置。代理开着时测出来的是代理质量，不是本机到 GitHub 的真实连通性——结论会完全反向。
+**为什么不是 5 个端点**：开发者通过许多独立路径访问 GitHub，它们分别失效。窄探测会报告"GitHub 一切正常"，而 `docker pull ghcr.io/...` 或 `git push` 已经死了。
 
-**为什么多次采样**：单次请求的成败在这个网络环境下接近随机（实测同一端点连续 10 次成功率在 30%–100% 间波动）。判定阈值只对成功率有意义，对单次结果没有意义。
+**SSH 端点只测传输层**，不测认证——认证是 Phase 1b 的职责。混在一起就会把"密钥没配"误报成"网络不通"。
+
+**为什么要绕代理**：探测必须加 `--noproxy '*'`。代理开着时测出来的是代理质量，不是本机到 GitHub 的真实连通性——结论会完全反向。
+
+**为什么多次采样**：单次请求的成败在这个网络环境下接近随机（实测同一端点连续 10 次成功率在 0%–100% 间波动）。判定阈值只对成功率有意义。
 
 ## Phase 2 — 判定
 
