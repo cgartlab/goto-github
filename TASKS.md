@@ -12,24 +12,6 @@
 
 ## 高优先级
 
-### T1. 给 v2.1.0 打 tag
-
-**依据**：`git tag -l` 返回 0 条。仓库有 CHANGELOG 的 2.1.0 / 2.0.0 / 1.0.0 三个版本节，
-但没有任何 tag 指向它们。外部无法引用「某个确切版本」。
-
-**影响**：`install.sh --version` 报的是 `VERSION` 文件里的值，与 CHANGELOG 之间
-没有可验证的锚点；用户报告问题时无法说明自己跑的是哪一版。
-
-**验收标准**：
-- `git tag -l` 至少列出 `v2.1.0`
-- tag 指向 `main` 上包含 `## [2.1.0]` 条目的提交
-- `git show v2.1.0 --stat` 能对应 CHANGELOG 2.1.0 的记录
-
-**注意**：CLI 产物版本是 `1.0.0`（见 CHANGELOG 顶部「Two version lines」），
-tag 打 `v2.1.0` 指的是 **skill 契约版本**，不是 CLI 版本。命名要避免混淆。
-
----
-
 ### T2. argus Bug 3：主模型超时不落入 fallback 队列
 
 **依据**（跨仓库，`cgartlab/argus`）：
@@ -132,6 +114,7 @@ fi
 
 | 版本 | 内容 | PR |
 |---|---|---|
+| 2.1.0 tag | `v2.1.0` 已打并推送（annotated tag，指向 `0b2080c`） | — |
 | 2.1.0 | 服务面 5 → 10+ 端点；新增 `auth_probe` 分离认证/网络失败；PS 5.1 真正可用；三平台 CI 矩阵 | #56, #57 |
 | 2.0.0 | 仓库重构为 Agent Skill 包（`SKILL.md` + `references/` + `scripts/` + `evals/`） | #55 |
 
