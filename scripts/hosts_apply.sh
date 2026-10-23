@@ -104,11 +104,18 @@ backup_hosts() {
         add_warning "backup failed; aborting without touching hosts"
         return 1
     fi
-    # Prune older backups (ls -1t sorts by mtime; keep newest KEEP_BACKUPS)
-    # shellcheck disable=SC2012
-    ls -1t "${HOSTS_FILE}.goto-github.bak."* 2>/dev/null | tail -n +"$((KEEP_BACKUPS + 1))" \
-        | while IFS= read -r old; do rm -f "$old"; done
+    # Prune older backups. The pipeline's exit status is deliberately ignored:
+    # with `set -o pipefail`, `ls` returns non-zero when the glob matches
+    # nothing, and that status would leak into this function's return value
+    # (the caller reads stdout, so a non-zero exit would drop the backup path).
+    {
+        # shellcheck disable=SC2012
+        ls -1t "${HOSTS_FILE}.goto-github.bak."* 2>/dev/null \
+            | tail -n +"$((KEEP_BACKUPS + 1))" \
+            | while IFS= read -r old; do rm -f "$old"; done
+    } 2>/dev/null || true
     printf '%s\n' "$backup"
+    return 0
 }
 
 # ── Platform predicates ──────────────────────────────────────────────────────

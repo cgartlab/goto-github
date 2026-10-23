@@ -185,7 +185,16 @@ jobs:
           $out = & pwsh -NoProfile -File scripts\connectivity_probe.ps1 -Attempts 3 -Timeout 4
           if ($LASTEXITCODE -ne 0) { $fail = 1 }
           $probe = $out | ConvertFrom-Json
-          if ($probe.endpoints.Count -ne 5) { Write-Host "  expected 5 endpoints"; $fail = 1 }
+          # 10 core endpoints as of the full-service-surface change; assert the
+          # count AND that the paths that used to be untested are present.
+          if ($probe.endpoints.Count -lt 10) {
+            Write-Host "  expected >= 10 endpoints, got $($probe.endpoints.Count)"; $fail = 1
+          }
+          foreach ($k in 'git_read', 'git_write', 'ssh22', 'ssh443') {
+            if (-not ($probe.endpoints | Where-Object { $_.key -eq $k })) {
+              Write-Host "  missing endpoint: $k"; $fail = 1
+            }
+          }
 
           Write-Host "== hosts_apply.ps1 (forced IP, temp hosts) =="
           $out = & pwsh -NoProfile -File scripts\hosts_apply.ps1 -Strategy priority

@@ -78,9 +78,20 @@ foreach ($k in 'id_rsa', 'id_ed25519', 'id_ecdsa') {
     if (Test-Path (Join-Path $sshDir $k)) { $hasKey = $true; break }
 }
 if (-not $hasKey) {
-    # ssh-agent may hold keys with no key file on disk
-    $agent = Get-Service -Name 'ssh-agent' -ErrorAction SilentlyContinue
-    if ($agent -and $agent.Status -eq 'Running') { $hasKey = $true }
+    # ssh-agent may hold keys with no key file on disk. Get-Service is
+    # Windows-only (it does not exist on Linux/macOS), so use a portable check:
+    # ask ssh-add whether it can see any identities.
+    $sshAdd = Get-Command ssh-add -ErrorAction SilentlyContinue
+    if ($sshAdd) {
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $identities = (& $sshAdd -l 2>&1 | Out-String)
+        } finally {
+            $ErrorActionPreference = $prevEap
+        }
+        if ($identities -match 'SHA256:|ssh-(rsa|ed25519|dss)') { $hasKey = $true }
+    }
 }
 
 if (-not $hasKey) {

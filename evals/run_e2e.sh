@@ -35,7 +35,28 @@ bad() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 
 valid_json() { case "$1" in \{*\}) return 0 ;; *) return 1 ;; esac; }
 
-marker_count() { grep -c '^# >>> goto-github >>>' "$1" 2>/dev/null || echo 0; }
+marker_count() {
+    # grep -c exits 1 and prints "0" when there are no matches, so folding it
+    # through `|| echo 0` yields "0\n0" on BSD grep — and the caller's integer
+    # comparison then fails with "integer expression expected". Capture the
+    # count and default it without appending a second value.
+    local n
+    n=$(grep -c '^# >>> goto-github >>>' "$1" 2>/dev/null)
+    case "$n" in
+        ''|*[!0-9]*) printf '0' ;;
+        *)           printf '%s' "$n" ;;
+    esac
+}
+
+# Portable temp file. BSD mktemp (macOS) requires the template's Xs at the end
+# and rejects a suffix after them, so "-t prefix-XXXXXX" works on GNU but not
+# BSD. mktemp with an explicit template path works on both.
+new_tmpfile() {
+    local t
+    t=$(mktemp "${TMPDIR:-/tmp}/gg-e2e-XXXXXXXX") 2>/dev/null \
+        || t=$(mktemp) 2>/dev/null
+    printf '%s' "$t"
+}
 
 echo "========== bash path: Phase 0 -> 1 -> 1b -> 3 -> 4 =========="
 
@@ -55,7 +76,7 @@ valid_json "$out" && ok "Phase 1b auth_probe: JSON" || bad "Phase 1b auth_probe"
 case "$out" in *'"ssh":{"state":'*)   ok "Phase 1b reports ssh state" ;;   *) bad "ssh state missing" ;; esac
 case "$out" in *'"https":{"state":'*) ok "Phase 1b reports https state" ;; *) bad "https state missing" ;; esac
 
-TMPH=$(mktemp -t gg-e2e-XXXXXX)
+TMPH=$(new_tmpfile)
 printf '127.0.0.1 localhost\n# keep\n' > "$TMPH"
 out=$(HOSTS_FILE="$TMPH" GOTO_GITHUB_TEST_PRIVILEGED=1 GOTO_GITHUB_FORCE_IP=140.82.114.21 \
       "${RUN_BASH[@]}" scripts/hosts_apply.sh --strategy priority 2>/dev/null)
@@ -88,7 +109,7 @@ else
     valid_json "$out" && ok "PS Phase 1b auth_probe: JSON" || bad "PS Phase 1b"
     case "$out" in *'"ssh":{"state":'*) ok "PS Phase 1b reports ssh state" ;; *) bad "PS ssh state" ;; esac
 
-    TMPW=$(mktemp -t gg-e2e-XXXXXX)
+    TMPW=$(new_tmpfile)
     printf '127.0.0.1 localhost\n# keep\n' > "$TMPW"
     out=$(HOSTS_FILE="$TMPW" GOTO_GITHUB_TEST_PRIVILEGED=1 GOTO_GITHUB_FORCE_IP=140.82.114.21 \
           "$PS_EXE" -NoProfile -File scripts/hosts_apply.ps1 -Strategy priority 2>/dev/null)
