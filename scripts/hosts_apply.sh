@@ -111,6 +111,11 @@ backup_hosts() {
     printf '%s\n' "$backup"
 }
 
+# ── Platform predicates ──────────────────────────────────────────────────────
+# Defined before first use: write_hosts_block() below calls is_macos().
+is_macos() { [ "$(uname)" = "Darwin" ]; }
+is_linux() { [ "$(uname)" = "Linux" ]; }
+
 # Strip any existing block, append the new one. Atomic via temp + mv.
 # Preserves permissions (macOS stat -f %Lp, GNU stat -c %a).
 write_hosts_block() {
@@ -155,8 +160,6 @@ write_hosts_block() {
     fi
     return 0
 }
-
-is_macos() { [ "$(uname)" = "Darwin" ]; }
 
 flush_dns_cache() {
     if is_macos; then

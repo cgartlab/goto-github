@@ -40,18 +40,18 @@ Environment:
 
 if ($Help) { & $showHelp; exit 0 }
 
-# ── Resolve repo root (scripts/ -> repo root) ────────────────────────────────
+# -- Resolve repo root (scripts/ -> repo root) --------------------------------
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 
-# ── Shared constants ─────────────────────────────────────────────────────────
+# -- Shared constants ---------------------------------------------------------
 # The PowerShell constants live in ps1/lib/ (the PowerShell implementation);
 # lib/ holds the bash implementation. The two must agree on markers and
-# sources — that contract is enforced by shared/parity-check.sh.
+# sources -- that contract is enforced by shared/parity-check.sh.
 . (Join-Path $script:RepoRoot 'ps1\lib\00-constants.ps1')
 
 $script:HostsFile = if ($env:HOSTS_FILE) { $env:HOSTS_FILE } else { "$env:SystemRoot\System32\drivers\etc\hosts" }
 
-# ── JSON escaping ────────────────────────────────────────────────────────────
+# -- JSON escaping ------------------------------------------------------------
 function ConvertTo-JsonLiteral {
     <#
     .SYNOPSIS
@@ -73,7 +73,7 @@ function ConvertTo-WarningsJson {
     return '[' + ($parts -join ',') + ']'
 }
 
-# ── Collect warnings in one place ────────────────────────────────────────────
+# -- Collect warnings in one place --------------------------------------------
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 
 function Add-Warning {
@@ -81,7 +81,7 @@ function Add-Warning {
     $script:Warnings.Add($Message) | Out-Null
 }
 
-# ── Platform ─────────────────────────────────────────────────────────────────
+# -- Platform -----------------------------------------------------------------
 $platform = if ($env:WSL_DISTRO_NAME) {
     'WSL'
 } elseif (Test-Path '/proc/version') {
@@ -96,10 +96,10 @@ $platform = if ($env:WSL_DISTRO_NAME) {
 }
 
 if ($platform -eq 'WSL') {
-    Add-Warning 'WSL detected; hosts behaviour differs from Windows — this skill does not support WSL'
+    Add-Warning 'WSL detected; hosts behaviour differs from Windows -- this skill does not support WSL'
 }
 
-# ── curl availability ────────────────────────────────────────────────────────
+# -- curl availability --------------------------------------------------------
 $curlAvailable = $false
 $curlPath = $null
 try {
@@ -110,7 +110,7 @@ try {
     Add-Warning 'curl.exe not found; all connectivity probing is impossible'
 }
 
-# ── Hosts marker block + shadowing ───────────────────────────────────────────
+# -- Hosts marker block + shadowing -------------------------------------------
 $hostsPresent = $false
 $hostsIp = $null
 $hostsShadowed = $false
@@ -155,7 +155,7 @@ if (Test-Path $script:HostsFile) {
     Add-Warning "hosts file not found: $script:HostsFile"
 }
 
-# ── Proxy state ──────────────────────────────────────────────────────────────
+# -- Proxy state --------------------------------------------------------------
 $proxyEnabled = $false
 $proxyServer = $null
 $proxySource = 'none'
@@ -183,7 +183,7 @@ if ($proxyEnabled) {
     Add-Warning "proxy detected ($proxySource); connectivity probing must bypass it or results are not attributable"
 }
 
-# ── DNS servers ──────────────────────────────────────────────────────────────
+# -- DNS servers --------------------------------------------------------------
 $dnsServers = @()
 try {
     $dnsServers = Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction Stop |
@@ -197,7 +197,7 @@ if (-not $dnsServers -or $dnsServers.Count -eq 0) {
     Add-Warning 'no DNS servers reported for any interface'
 }
 
-# ── gh auth state ────────────────────────────────────────────────────────────
+# -- gh auth state ------------------------------------------------------------
 $ghState = 'error'
 $ghWarning = $null
 
@@ -229,7 +229,7 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
     $ghState = 'none'
 }
 
-# ── Privilege ────────────────────────────────────────────────────────────────
+# -- Privilege ----------------------------------------------------------------
 $privileged = $false
 try {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -239,7 +239,7 @@ try {
     Add-Warning 'could not determine administrator status'
 }
 
-# ── DoH state (Windows only; hosts is bypassed by DoH clients) ───────────────
+# -- DoH state (Windows only; hosts is bypassed by DoH clients) ---------------
 $dohState = $null
 if ($platform -eq 'Windows') {
     $dohExplicit = $false
@@ -258,7 +258,7 @@ if ($platform -eq 'Windows') {
     }
 }
 
-# ── Emit JSON (single line, stdout only) ─────────────────────────────────────
+# -- Emit JSON (single line, stdout only) -------------------------------------
 $dohJson = if ($null -eq $dohState) { 'null' } else { '{"explicit":' + $dohState.explicit.ToString().ToLower() + ',"auto_upgrade":' + $dohState.auto_upgrade.ToString().ToLower() + '}' }
 $dnsJson = if ($dnsServers -and $dnsServers.Count -gt 0) { '[' + (($dnsServers | ForEach-Object { ConvertTo-JsonLiteral $_ }) -join ',') + ']' } else { '[]' }
 

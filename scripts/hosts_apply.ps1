@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Phase 3 hosts repair for the goto-github skill (WRITES the hosts file).
@@ -7,7 +7,7 @@
     Writes the goto-github marker block into the Windows hosts file.
     Strategy chain: priority IPs -> community sources -> CIDR scan.
 
-    Safety (see references/safety-and-boundaries.md — non-negotiable):
+    Safety (see references/safety-and-boundaries.md -- non-negotiable):
       - backup before any write; abort if the backup fails
       - shadowing check before AND after the write
       - never edit outside the marker block
@@ -57,7 +57,7 @@ Environment:
 
 if ($Help) { & $showHelp; exit 0 }
 
-# ── Resolve repo root and load the skill's own constants ─────────────────────
+# -- Resolve repo root and load the skill's own constants ---------------------
 # scripts/lib/constants.ps1 is the skill layer's single source of truth. It is
 # deliberately independent of ps1/lib/00-constants.ps1 (which belongs to the
 # scan-based CLI and lacks SOURCES / KEEP_BACKUPS / PROBE_TEST_CAP).
@@ -124,14 +124,14 @@ function Get-CurlPath {
     try { return (Get-Command curl.exe -ErrorAction Stop).Source } catch { return $null }
 }
 
-# ── Privilege (no auto-elevation) ────────────────────────────────────────────
+# -- Privilege (no auto-elevation) --------------------------------------------
 # GOTO_GITHUB_TEST_PRIVILEGED=1 skips the check so the write path can be
-# exercised against a temp HOSTS_FILE in CI. It grants no real privilege —
+# exercised against a temp HOSTS_FILE in CI. It grants no real privilege --
 # writing a system hosts file still fails without admin rights.
 function Test-IsAdmin {
     try {
         $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $p = [Security.Principal.WindowsPrincipal]::new($id)
+        $p = [Security.Principal.WindowsPrincipal]$id
         return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     } catch {
         return $false
@@ -143,7 +143,7 @@ function Test-CanWriteHosts {
     return (Test-IsAdmin)
 }
 
-# ── Shadowing detection ──────────────────────────────────────────────────────
+# -- Shadowing detection ------------------------------------------------------
 # hosts resolves the FIRST match, so another tool's github.com entry ABOVE our
 # marker makes the whole block inert. Report it; never edit outside the block.
 function Get-ShadowingState {
@@ -157,7 +157,7 @@ function Get-ShadowingState {
     return $null
 }
 
-# ── Probe one IP against the git endpoint ────────────────────────────────────
+# -- Probe one IP against the git endpoint ------------------------------------
 function Test-IpForGit {
     param([string]$Ip)
 
@@ -166,7 +166,7 @@ function Test-IpForGit {
 
     # --resolve forces the IP while SNI still routes to github.com, so the IP
     # must actually serve that Host. A 2xx from the git endpoint is the only
-    # acceptable answer — the homepage can lie.
+    # acceptable answer -- the homepage can lie.
     $code = & $curl --noproxy '*' -s -o NUL `
         --connect-timeout 3 --max-time 6 `
         -w '%{http_code}' `
@@ -177,7 +177,7 @@ function Test-IpForGit {
     return ("$code" -match '^2')
 }
 
-# ── Strategy 1: priority IPs ─────────────────────────────────────────────────
+# -- Strategy 1: priority IPs -------------------------------------------------
 function Find-PriorityIp {
     foreach ($ip in $script:PRIORITY_IPS) {
         if (Test-IpForGit -Ip $ip) { return $ip }
@@ -185,7 +185,7 @@ function Find-PriorityIp {
     return $null
 }
 
-# ── Strategy 2: community sources ────────────────────────────────────────────
+# -- Strategy 2: community sources --------------------------------------------
 function Find-CommunityIp {
     $curl = Get-CurlPath
     if (-not $curl) { return $null }
@@ -215,7 +215,7 @@ function Find-CommunityIp {
     return $null
 }
 
-# ── Strategy 3: CIDR scan (last resort) ──────────────────────────────────────
+# -- Strategy 3: CIDR scan (last resort) --------------------------------------
 function Expand-CidrToIPs {
     <#
     .SYNOPSIS
@@ -248,7 +248,7 @@ function Expand-CidrToIPs {
             $v = $baseInt + $i
             $vb = [System.BitConverter]::GetBytes([uint32]$v)
             [array]::Reverse($vb)
-            $ips.Add([System.Net.IPAddress]::new($vb).ToString()) | Out-Null
+            $ips.Add(([System.Net.IPAddress]$vb).ToString()) | Out-Null
         }
     }
     return $ips
@@ -268,30 +268,72 @@ function Find-CidrIp {
     }
     if ($candidates.Count -eq 0) { return $null }
 
-    # Parallel probe, bounded by CONCURRENT_BATCH. $using: only — parent-scope
-    # functions and $script: variables are NOT visible inside -Parallel.
-    $localCurl = $curl
-    $localTarget = $script:GitProbeTarget
-    $localTimeout = $script:CONNECT_TIMEOUT
-    $localMaxTime = $script:MAX_TIME
-    $localBatch = $script:CONCURRENT_BATCH
-
-    $hits = @($candidates | ForEach-Object -Parallel {
-        $ip = $_
-        $code = & $using:localCurl --noproxy '*' -s -o NUL `
-            --connect-timeout $using:localTimeout --max-time $using:localMaxTime `
-            -w '%{http_code}' `
-            -H 'Accept: application/x-git-upload-pack-advertisement' `
-            $using:localTarget `
-            --resolve "github.com:443:$ip" 2>$null
-        if ("$code" -match '^2') { $ip }
-    } -ThrottleLimit $localBatch)
-
-    if ($hits -and $hits.Count -gt 0) { return $hits[0] }
-    return $null
+    # Runspace pool, not ForEach-Object -Parallel: -Parallel is PowerShell 7+
+    # only, and this skill must run on Windows PowerShell 5.1 (the Windows
+    # default). Runspace pools exist in both.
+    return (Find-IpInParallel -Candidates $candidates.ToArray() -Curl $curl)
 }
 
-# ── Backup ───────────────────────────────────────────────────────────────────
+function Find-IpInParallel {
+    <#
+    .SYNOPSIS
+        Probe candidate IPs concurrently and return the first that answers 2xx.
+    .DESCRIPTION
+        Uses a runspace pool so this works on PowerShell 5.1 and 7+ alike.
+        Each runspace gets the values it needs as script arguments -- runspaces
+        do not share the caller's scope.
+    #>
+    param(
+        [string[]]$Candidates,
+        [string]$Curl
+    )
+
+    $target = $script:GitProbeTarget
+    $timeout = $script:CONNECT_TIMEOUT
+    $maxTime = $script:MAX_TIME
+    $batch = [Math]::Min($script:CONCURRENT_BATCH, $Candidates.Count)
+
+    $pool = [runspacefactory]::CreateRunspacePool(1, $batch)
+    $pool.Open()
+
+    $scriptBlock = {
+        param($ip, $curlPath, $url, $ct, $mt)
+        $code = & $curlPath --noproxy '*' -s -o NUL `
+            --connect-timeout $ct --max-time $mt `
+            -w '%{http_code}' `
+            -H 'Accept: application/x-git-upload-pack-advertisement' `
+            $url `
+            --resolve "github.com:443:$ip" 2>$null
+        if ("$code" -match '^2') { return $ip }
+        return $null
+    }
+
+    try {
+        $jobs = New-Object System.Collections.Generic.List[object]
+        foreach ($ip in $Candidates) {
+            $ps = [powershell]::Create()
+            $ps.RunspacePool = $pool
+            $null = $ps.AddScript($scriptBlock).AddArgument($ip).AddArgument($Curl).
+                AddArgument($target).AddArgument($timeout).AddArgument($maxTime)
+            $jobs.Add(@{ PS = $ps; Handle = $ps.BeginInvoke() })
+        }
+
+        foreach ($job in $jobs) {
+            $out = $job.PS.EndInvoke($job.Handle)
+            $job.PS.Dispose()
+            if ($out -and $out.Count -gt 0) {
+                $hit = @($out | Where-Object { $_ -and $_ -ne $null } | Select-Object -First 1)
+                if ($hit.Count -gt 0) { return $hit[0] }
+            }
+        }
+        return $null
+    } finally {
+        $pool.Close()
+        $pool.Dispose()
+    }
+}
+
+# -- Backup -------------------------------------------------------------------
 function Backup-Hosts {
     $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
     $backupPath = "$script:HostsFile.goto-github.bak.$timestamp"
@@ -309,7 +351,7 @@ function Backup-Hosts {
     return $backupPath
 }
 
-# ── Write the marker block ───────────────────────────────────────────────────
+# -- Write the marker block ---------------------------------------------------
 function Write-HostsBlock {
     param([string]$Ip)
 
@@ -337,13 +379,27 @@ function Write-HostsBlock {
     }
     $null = $out.Add($markerEnd)
 
-    # Atomic replace: temp file then Move (NOT Move-Item, to avoid the ACL
-    # copy step). Preserves CRLF because ReadAllLines/WriteAllLines keep the
-    # original line endings.
-    $tempFile = [System.IO.Path]::GetTempFileName()
+    # Atomic replace. File.Move(src, dst, overwrite) is .NET Core only -- the
+    # three-argument overload does not exist in .NET Framework, which is what
+    # Windows PowerShell 5.1 runs on ("Cannot find an overload for Move and the
+    # argument count 3"). File.Replace is available on both and preserves the
+    # destination's ACL, so it is the portable choice when the target exists.
+    #
+    # File.Replace also requires source and destination to be on the same
+    # volume, so the temp file is created next to the hosts file rather than in
+    # %TEMP% (which may be on another drive).
+    $hostsDir = Split-Path -Parent $script:HostsFile
+    $tempFile = Join-Path $hostsDir ('.goto-github-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     try {
         [System.IO.File]::WriteAllLines($tempFile, $out)
-        [System.IO.File]::Move($tempFile, $script:HostsFile, $true)
+
+        if (Test-Path $script:HostsFile) {
+            $backupForReplace = "$tempFile.orig"
+            [System.IO.File]::Replace($tempFile, $script:HostsFile, $backupForReplace)
+            if (Test-Path $backupForReplace) { Remove-Item $backupForReplace -Force -ErrorAction SilentlyContinue }
+        } else {
+            [System.IO.File]::Move($tempFile, $script:HostsFile)
+        }
     } catch {
         if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
         throw "failed to write hosts file: $($_.Exception.Message)"
@@ -352,7 +408,7 @@ function Write-HostsBlock {
     return ($script:CORE_DOMAINS.Count)
 }
 
-# ── DNS flush ────────────────────────────────────────────────────────────────
+# -- DNS flush ----------------------------------------------------------------
 function Invoke-DnsFlush {
     try {
         & ipconfig /flushdns 2>&1 | Out-Null
@@ -364,7 +420,7 @@ function Invoke-DnsFlush {
     }
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 if (-not (Test-CanWriteHosts)) {
     # Report the command; never auto-elevate. stderr, so stdout stays a clean
     # single JSON line.
@@ -453,7 +509,7 @@ try {
     exit 1
 }
 
-# Shadowing check (after) — the write cannot have introduced one, but the
+# Shadowing check (after) -- the write cannot have introduced one, but the
 # block position may have moved relative to other entries.
 if ($startIdx -ge 0) {
     $lines2 = [System.IO.File]::ReadAllLines($script:HostsFile)
