@@ -51,7 +51,10 @@ function Get-Endpoints {
         $list.Add(@{ Key = 'mavenpkg'; Url = 'https://maven.pkg.github.com/';                   Group = 'registry'; Kind = 'http' })
         $list.Add(@{ Key = 'avatars';  Url = 'https://avatars.githubusercontent.com/';          Group = 'assets';   Kind = 'http' })
         $list.Add(@{ Key = 'objects';  Url = 'https://objects.githubusercontent.com/';          Group = 'assets';   Kind = 'http' })
-        $list.Add(@{ Key = 'pages';    Url = 'https://cgartlab.github.io/';                     Group = 'web';      Kind = 'http' })
+        # Derive the Pages host from PROBE_REPO's owner instead of hard-coding
+        # one account (see the bash twin).
+        $owner = ($repo -split '/')[0]
+        $list.Add(@{ Key = 'pages';    Url = "https://$owner.github.io/";                         Group = 'web';      Kind = 'http' })
     }
 
     return $list

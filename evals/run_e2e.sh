@@ -71,6 +71,35 @@ n=$(printf '%s' "$out" | grep -o '"key":' | wc -l)
 case "$out" in *'"key":"git_write"'*) ok "Phase 1 includes git_write (push path)" ;; *) bad "git_write missing" ;; esac
 case "$out" in *'"key":"ssh443"'*)   ok "Phase 1 includes ssh443" ;;              *) bad "ssh443 missing" ;; esac
 
+# --scope all adds 6 endpoints (ghcr / npmpkg / mavenpkg / avatars / objects /
+# pages) that nothing else exercises. Reachability is not asserted — those
+# hosts are outside our control and may legitimately be down — only that the
+# probe emits a well-formed record for each, i.e. the code path runs.
+out=$("${RUN_BASH[@]}" scripts/connectivity_probe.sh --attempts 1 --timeout 5 --scope all 2>/dev/null)
+valid_json "$out" && ok "Phase 1 --scope all: JSON" || bad "Phase 1 --scope all"
+n=$(printf '%s' "$out" | grep -o '"key":' | wc -l)
+[ "$n" -ge 16 ] && ok "Phase 1 --scope all covers $n endpoints (>=16)" || bad "Phase 1 --scope all only $n endpoints"
+all_present=1
+for k in ghcr npmpkg mavenpkg avatars objects pages; do
+    case "$out" in
+        *"\"key\":\"$k\""*) ;;
+        *) all_present=0; echo "    missing endpoint: $k" ;;
+    esac
+done
+[ "$all_present" -eq 1 ] && ok "Phase 1 --scope all includes all 6 registry/asset endpoints" \
+    || bad "Phase 1 --scope all is missing endpoints"
+
+# The default repo is the maintainer one, so a hardcoded Pages host would
+# still satisfy the assertions above. Probe a *different* owner to prove the
+# host is actually derived from PROBE_REPO.
+alt_out=$(PROBE_REPO=example-org/example-repo "${RUN_BASH[@]}" \
+    scripts/connectivity_probe.sh --attempts 1 --timeout 3 --scope all 2>/dev/null)
+case "$alt_out" in
+    *'"key":"pages","url":"https://example-org.github.io/"'*)
+        ok "pages host derives from PROBE_REPO owner" ;;
+    *) bad "pages host is still hardcoded (PROBE_REPO had no effect)" ;;
+esac
+
 out=$("${RUN_BASH[@]}" scripts/auth_probe.sh 2>/dev/null)
 valid_json "$out" && ok "Phase 1b auth_probe: JSON" || bad "Phase 1b auth_probe"
 case "$out" in *'"ssh":{"state":'*)   ok "Phase 1b reports ssh state" ;;   *) bad "ssh state missing" ;; esac
@@ -114,6 +143,30 @@ else
     valid_json "$out" && ok "PS Phase 1 connectivity_probe: JSON" || bad "PS Phase 1"
     n=$(printf '%s' "$out" | grep -o '"key":' | wc -l)
     [ "$n" -ge 10 ] && ok "PS Phase 1 covers $n endpoints" || bad "PS Phase 1 only $n endpoints"
+
+    out=$("$PS_EXE" -NoProfile -File scripts/connectivity_probe.ps1 -Attempts 1 -Timeout 5 -Scope all 2>/dev/null)
+    valid_json "$out" && ok "PS Phase 1 --scope all: JSON" || bad "PS Phase 1 --scope all"
+    n=$(printf '%s' "$out" | grep -o '"key":' | wc -l)
+    [ "$n" -ge 16 ] && ok "PS Phase 1 --scope all covers $n endpoints" || bad "PS Phase 1 --scope all only $n endpoints"
+    # Same per-key loop as the bash block: a duplicate key plus a missing one
+    # still satisfies n >= 16, so the count alone cannot catch that.
+    all_present=1
+    for k in ghcr npmpkg mavenpkg avatars objects pages; do
+        case "$out" in
+            *"\"key\":\"$k\""*) ;;
+            *) all_present=0; echo "    missing endpoint: $k" ;;
+        esac
+    done
+    [ "$all_present" -eq 1 ] && ok "PS --scope all includes all 6 endpoints" \
+        || bad "PS Phase 1 --scope all is missing endpoints"
+
+    alt_out=$(PROBE_REPO=example-org/example-repo "$PS_EXE" -NoProfile \
+        -File scripts/connectivity_probe.ps1 -Attempts 1 -Timeout 3 -Scope all 2>/dev/null)
+    case "$alt_out" in
+        *'"key":"pages","url":"https://example-org.github.io/"'*)
+            ok "PS pages host derives from PROBE_REPO owner" ;;
+        *) bad "PS pages host is still hardcoded (PROBE_REPO had no effect)" ;;
+    esac
 
     out=$("$PS_EXE" -NoProfile -File scripts/auth_probe.ps1 2>/dev/null)
     valid_json "$out" && ok "PS Phase 1b auth_probe: JSON" || bad "PS Phase 1b"

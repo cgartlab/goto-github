@@ -40,7 +40,7 @@ param(
     [int]$Attempts = 10,
     [ValidateSet('fast', 'all')][string]$Scope = 'fast',
     [int]$Timeout = 5,
-    [string]$Repo = 'cgartlab/goto-github',
+    [string]$Repo = $env:PROBE_REPO,
     [switch]$Help
 )
 
@@ -82,11 +82,23 @@ Requires PowerShell 5.1+.
 if ($Help) { & $showHelp; exit 0 }
 
 # shellcheck disable=SC1091
+# constants.ps1 owns the PROBE_REPO contract (env var > default). Without
+# it this script silently ignored $env:PROBE_REPO, so the Pages endpoint
+# derived the wrong owner on PowerShell while bash got it right.
+. (Join-Path $PSScriptRoot 'lib\constants.ps1')
 . (Join-Path $PSScriptRoot 'lib\endpoints.ps1')
 . (Join-Path $PSScriptRoot 'lib\probe.ps1')
 
 # Repo override must be applied before Get-Endpoints builds the URLs.
-if ($Repo) { $script:PROBE_REPO = $Repo }
+if ($Repo) {
+    # Get-Endpoints derives the Pages host from the owner, so a malformed
+    # value (e.g. "/repo") would yield "https://.github.io/".
+    if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        Write-StderrWarning "-Repo '$Repo' is not owner/repo; using the default"
+    } else {
+        $script:PROBE_REPO = $Repo
+    }
+}
 
 if ($Attempts -lt 5) {
     Write-StderrWarning "-Attempts $Attempts is below 5; the success rate is not statistically meaningful"
