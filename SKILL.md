@@ -1,11 +1,11 @@
 ---
 name: goto-github
-description: GitHub 访问诊断与加速 skill。当用户说 GitHub 连不上/打不开/很慢/clone 失败/被墙、或问"GitHub 是否可用/直连是否正常/要不要改 hosts"、或需要诊断网络环境对 GitHub 各服务（网页/API/git/raw/下载）的连通性时激活：先探测环境（hosts/代理/DNS/gh 鉴权），再对 GitHub 各端点做统计采样判定，直连可用则报告、不可达则写入 hosts 标记块修复并验证。覆盖 macOS/Linux/Windows。Use this skill whenever the user asks whether GitHub is reachable or slow from their machine, wants to diagnose or fix GitHub connectivity problems (clone failures, page timeouts, API errors), or asks about modifying hosts for GitHub — even when they don't say "goto-github".
+description: GitHub 访问诊断与加速 skill。当用户说 GitHub 连不上/打不开/很慢/clone 失败/push 失败/ssh 连不上/被墙、或问"GitHub 是否可用/直连是否正常/要不要改 hosts"、或需要诊断网络环境对 GitHub 各服务（网页/API/git 读写/raw/下载/SSH/容器镜像 ghcr/npm、maven 包）的连通性与凭据状态时激活：先探测环境（hosts/代理/DNS/gh 鉴权），再对 GitHub 各端点做统计采样判定，并单独区分「认证失败」与「网络失败」，直连可用则报告、不可达则写入 hosts 标记块修复并验证。覆盖 macOS/Linux/Windows。Use this skill whenever the user asks whether GitHub is reachable or slow from their machine, wants to diagnose or fix GitHub connectivity problems (clone failures, push failures, SSH auth, page timeouts, API errors, registry pulls), or asks about modifying hosts for GitHub — even when they don't say "goto-github".
 license: MIT
-compatibility: Requires bash or PowerShell 7 (script detection per platform). curl is mandatory for probing. hosts modification requires admin/root privileges. All analysis is local — no third-party services. Windows PowerShell 5.1 is supported for the pull-based path only; the scan path requires PowerShell 7.
+compatibility: Requires bash 3.2+ or PowerShell 5.1+ (both supported on every platform; the script layer is a twin bash/PowerShell implementation with identical JSON output). curl is mandatory for probing. hosts modification requires admin/root privileges. All analysis is local - no third-party services.
 metadata:
-  version: "2.0.0"
-  date: "2026-10-20"
+  version: "2.1.0"
+  date: "2026-10-23"
   reference: "https://github.com/cgartlab/goto-github"
 ---
 
@@ -159,7 +159,7 @@ Phase 4 报告（hosts_status：网络 verdict + auth 维度 + warnings[]）
 
 调用 `hosts_status.{sh,ps1}` 复测，与 Phase 1 数据对比，输出四件事：
 
-1. **修复前状态**：5 端点成功率表（Phase 1 数据）。
+1. **修复前状态**：全端点成功率表（Phase 1 数据）。
 2. **修复动作**：用了哪个策略、写入哪个 IP、备份文件路径。
 3. **修复后状态**：复测结果，与修复前对比。
 4. **判定**：`fixed` / `partial`（部分端点改善）/ `not_fixed` + `warnings[]`。

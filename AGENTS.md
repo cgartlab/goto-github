@@ -3,7 +3,7 @@
 > **会话约定**：开始任何工作前，先读根目录 `LESSONS.md`（本仓库从真实失误沉淀的「教训→规则」清单）并遵循其中所有规则；遇到新失误按其 §维护 追加。依据：Anthropic Claude Code memory/best practices + 社区 lessons.md 惯例。
 
 **分类**: 工具 (Tools) — 网络实用工具 · Agent Skill
-**技术栈**: Bash 3.2+ (macOS/Linux/Git Bash) · PowerShell 5.1+ (Windows) · PowerShell 7+ (扫描式与 skill 脚本)
+**技术栈**: Bash 3.2+ (macOS/Linux/Git Bash) · PowerShell 5.1+ (Windows) · skill 脚本双实现均支持 bash 3.2+ / PS 5.1+ · ps1/ 扫描式仍需 PS 7+
 
 GitHub 连通性诊断与加速。探测本机到 GitHub 各端点的连通性，按证据分级判定，必要时写入 hosts 修复并验证。**两种用法共享同一套引擎与安全边界**：Agent Skill（`SKILL.md` + `scripts/` + `references/`）与 CLI 工具（`fetch.sh` / `goto-github.ps1` / `ps1/`）。
 
@@ -13,13 +13,14 @@ GitHub 连通性诊断与加速。探测本机到 GitHub 各端点的连通性�
 goto-github/
 ├── SKILL.md                # Skill 入口：frontmatter + 路由 + Phase 决策树
 ├── references/             # 细则唯一真源（SKILL.md 只做路由，不内联副本）
-│   ├── judgment-criteria.md    # 5 端点固定、4 档分级阈值、单次结果不是证据
+│   ├── judgment-criteria.md    # 10+ 端点、network/auth 双维度、噪声阈值
 │   ├── probe-recipes.md        # 4 个脚本的 JSON 字段语义、null vs [] 约定
 │   ├── safety-and-boundaries.md# hosts 红线：备份/标记块/遮蔽检测/不自动提权
 │   └── environment-and-prereqs.md # 平台矩阵、绕代理、WSL/DoH/PS5.1 退出条件
 ├── scripts/                # Skill 黑盒脚本（bash .sh + PowerShell .ps1 双套同形 JSON）
 │   ├── env_detection.{sh,ps1}      # Phase 0 环境探测
-│   ├── connectivity_probe.{sh,ps1} # Phase 1 5 端点 × N 次统计采样
+│   ├── connectivity_probe.{sh,ps1} # Phase 1 10+ 端点 × N 次统计采样
+│   ├── auth_probe.{sh,ps1}         # Phase 1b 凭据状态（ssh/https/gh），与网络维度分离
 │   ├── hosts_apply.{sh,ps1}        # Phase 3 写盘
 │   ├── hosts_status.{sh,ps1}       # Phase 4 复测 + verdict
 │   └── lib/constants.{sh,ps1}      # Skill 层常量真源（独立于 CLI 的 lib/ 与 ps1/lib/）
@@ -79,6 +80,7 @@ goto-github/
 |------|------|---------|
 | `./scripts/env_detection.sh` | Phase 0 环境探测（只读） | ❌ |
 | `./scripts/connectivity_probe.sh` | Phase 1 采样（只读） | ❌ |
+| `./scripts/auth_probe.sh` | Phase 1b 凭据状态（只读） | ❌ |
 | `sudo ./scripts/hosts_apply.sh` | Phase 3 写 hosts | ✅ |
 | `./scripts/hosts_status.sh` | Phase 4 复测（只读） | ❌ |
 
@@ -91,12 +93,13 @@ goto-github/
 | `.\goto-github.ps1 --pwsh auto` | 一键加速 | 修改 hosts 时需要 |
 | `.\goto-github.ps1 --pwsh restore` | 恢复 hosts | 修改 hosts 时需要 |
 
-### Skill 脚本（PowerShell 7）
+### Skill 脚本（PowerShell 5.1+ / 7+）
 
 | 命令 | 功能 | 需管理员 |
 |------|------|---------|
 | `.\scripts\env_detection.ps1 -Help` | Phase 0 环境探测（只读） | ❌ |
 | `.\scripts\connectivity_probe.ps1 -Attempts 10` | Phase 1 采样（只读） | ❌ |
+| `.\scripts\auth_probe.ps1` | Phase 1b 凭据状态（只读） | ❌ |
 | `.\scripts\hosts_apply.ps1 -Strategy auto` | Phase 3 写 hosts | ✅ |
 | `.\scripts\hosts_status.ps1 -Baseline .\b.json` | Phase 4 复测（只读） | ❌ |
 
@@ -136,7 +139,7 @@ goto-github/
 - **Skill 与 CLI 的分层**：`SKILL.md` 只做路由 + Phase 流程 + 6 条元规则；判定阈值、JSON 契约、安全边界、环境要求全部在 `references/`。`scripts/lib/constants.{sh,ps1}` 是 skill 层自己的常量真源，**不**依赖 CLI 的 `lib/` 与 `ps1/lib/`——CLI 改动不能 silently 改变 skill 写什么
 - **双语言契约**：`scripts/*.sh` 与 `scripts/*.ps1` 输出同形 JSON（字段名、类型、key 顺序一致）。改一侧必须同步另一侧
 - **探测目标**：所有 IP 探测用 git smart-http 端点（`info/refs?service=git-upload-pack`），不是首页。`PROBE_TARGET` 只在 `ps1/lib/00-constants.ps1` 声明一次；`tests/test-ps-02-scan.ps1` 有断言锁住它，且做过反向验证（改回首页 → 3 个断言 FAIL）
-- **分级报告**：禁止把 5 个端点合并成"能用/不能用"。干扰按路径而非按 IP（实测同 IP 的 API 100% 而网页 30%）
+- **分级报告**：禁止把所有端点合并成"能用/不能用"。干扰按路径而非按 IP（实测同 IP 的 API 100% 而网页 30%）
 - **单次结果不是证据**：判定只用成功率（默认 10 次采样）。实测同一端点 1 分钟间隔两次采样可差 30 个百分点
 - **未改善要如实报**：`hosts_status` 的 verdict 支持 `--baseline` 对比；无改善时输出 `not_fixed`，不宣称修复
 - 单元测试：`tests/test-00..04-*.sh`（mock curl，无需网络）；`make test` 逐个运行

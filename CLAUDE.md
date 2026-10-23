@@ -13,14 +13,15 @@ Bash 侧是薄入口 `fetch.sh` + `lib/` 模块（单元测试、mock curl、无
 ```
 SKILL.md                    # Skill 入口：frontmatter + 路由 + Phase 决策树
 references/                 # 判定标准 / JSON 契约 / 安全边界 / 环境要求（细则唯一真源）
-├── judgment-criteria.md    # 5 端点固定、4 档分级阈值、单次结果不是证据
+├── judgment-criteria.md    # 10+ 端点、network/auth 双维度、噪声阈值
 ├── probe-recipes.md        # 4 个脚本的 JSON 字段语义、null vs [] 约定
 ├── safety-and-boundaries.md# hosts 红线：备份/标记块/遮蔽检测/不自动提权
 └── environment-and-prereqs.md # 平台矩阵、绕代理、WSL/DoH/PS5.1 退出条件
 
 scripts/                    # Skill 的黑盒脚本（bash .sh + PowerShell .ps1 双套同形 JSON）
 ├── env_detection.{sh,ps1}      # Phase 0 环境探测
-├── connectivity_probe.{sh,ps1} # Phase 1 5 端点 × N 次统计采样
+├── connectivity_probe.{sh,ps1} # Phase 1 10+ 端点 × N 次统计采样
+├── auth_probe.{sh,ps1}          # Phase 1b 凭据状态（ssh/https/gh），与网络维度分离
 ├── hosts_apply.{sh,ps1}        # Phase 3 写盘（备份→标记块→遮蔽检测→刷 DNS）
 ├── hosts_status.{sh,ps1}       # Phase 4 复测 + verdict
 └── lib/constants.{sh,ps1}      # Skill 层常量真源（独立于 CLI 的 lib/ 与 ps1/lib/）
@@ -81,6 +82,7 @@ sudo ./fetch.sh --restore   # 移除 goto-github 条目
 ```bash
 ./scripts/env_detection.sh          # Phase 0 环境探测（只读）
 ./scripts/connectivity_probe.sh     # Phase 1 采样（只读）
+./scripts/auth_probe.sh           # Phase 1b 凭据状态（只读）
 sudo ./scripts/hosts_apply.sh       # Phase 3 写 hosts（需 root）
 ./scripts/hosts_status.sh           # Phase 4 复测（只读）
 ```
@@ -94,10 +96,11 @@ sudo ./scripts/hosts_apply.sh       # Phase 3 写 hosts（需 root）
 .\goto-github.ps1 --pwsh restore # 恢复 hosts（需管理员）
 ```
 
-**Skill 脚本（PowerShell 7）:**
+**Skill 脚本（PowerShell 5.1+ / 7+）:**
 ```powershell
 .\scripts\env_detection.ps1 -Help
 .\scripts\connectivity_probe.ps1 -Attempts 10
+.\scripts\auth_probe.ps1                      # Phase 1b 凭据状态（只读）
 .\scripts\hosts_apply.ps1 -Strategy auto      # 需管理员
 .\scripts\hosts_status.ps1 -Baseline .\before.json
 ```
