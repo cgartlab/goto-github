@@ -96,7 +96,7 @@ sudo ./scripts/hosts_apply.sh       # Phase 3 写 hosts（需 root）
 .\goto-github.ps1 --pwsh restore # 恢复 hosts（需管理员）
 ```
 
-**Skill 脚本（PowerShell 7）:**
+**Skill 脚本（PowerShell 5.1+ / 7+）:**
 ```powershell
 .\scripts\env_detection.ps1 -Help
 .\scripts\connectivity_probe.ps1 -Attempts 10

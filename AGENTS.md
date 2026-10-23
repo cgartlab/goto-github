@@ -3,7 +3,7 @@
 > **会话约定**：开始任何工作前，先读根目录 `LESSONS.md`（本仓库从真实失误沉淀的「教训→规则」清单）并遵循其中所有规则；遇到新失误按其 §维护 追加。依据：Anthropic Claude Code memory/best practices + 社区 lessons.md 惯例。
 
 **分类**: 工具 (Tools) — 网络实用工具 · Agent Skill
-**技术栈**: Bash 3.2+ (macOS/Linux/Git Bash) · PowerShell 5.1+ (Windows) · PowerShell 7+ (扫描式与 skill 脚本)
+**技术栈**: Bash 3.2+ (macOS/Linux/Git Bash) · PowerShell 5.1+ (Windows) · skill 脚本双实现均支持 bash 3.2+ / PS 5.1+ · ps1/ 扫描式仍需 PS 7+
 
 GitHub 连通性诊断与加速。探测本机到 GitHub 各端点的连通性，按证据分级判定，必要时写入 hosts 修复并验证。**两种用法共享同一套引擎与安全边界**：Agent Skill（`SKILL.md` + `scripts/` + `references/`）与 CLI 工具（`fetch.sh` / `goto-github.ps1` / `ps1/`）。
 
@@ -93,7 +93,7 @@ goto-github/
 | `.\goto-github.ps1 --pwsh auto` | 一键加速 | 修改 hosts 时需要 |
 | `.\goto-github.ps1 --pwsh restore` | 恢复 hosts | 修改 hosts 时需要 |
 
-### Skill 脚本（PowerShell 7）
+### Skill 脚本（PowerShell 5.1+ / 7+）
 
 | 命令 | 功能 | 需管理员 |
 |------|------|---------|

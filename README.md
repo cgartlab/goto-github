@@ -168,7 +168,7 @@ GitHub 按 IP 精确干扰时，社区源列出的 IP 可能恰好被阻断。�
 | 平台 | 依赖 |
 |------|------|
 | macOS / Linux | Bash 3.2+、curl |
-| Windows | PowerShell 5.1+（拉取式）或 PowerShell 7+（扫描式 `ps1/`）、curl.exe |
+| Windows | PowerShell 5.1+（拉取式与 skill 脚本）或 PowerShell 7+（扫描式 `ps1/`）、curl.exe |
 
 所有平台修改 hosts 均需要管理员权限。
 
