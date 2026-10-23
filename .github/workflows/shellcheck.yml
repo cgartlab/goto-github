@@ -254,6 +254,26 @@ jobs:
           [ $fail -ne 0 ] && exit 1
           echo "all .sh are LF"
 
+      - name: Check no nested heredoc (bash 3.2 cannot parse it)
+        run: |
+          # printf '%s' "$(cat <<EOF ... EOF)" breaks bash 3.2 parsing: the
+          # heredoc is truncated and later case labels shift, producing a
+          # syntax error at an unrelated line. bash -n on 5.x does not catch it.
+          fail=0
+          for f in scripts/*.sh scripts/lib/*.sh; do
+            [ -f "$f" ] || continue
+            while IFS= read -r line; do
+              case "$line" in
+                \#*) continue ;;
+              esac
+              case "$line" in
+                *'$('*'<<EOF'*|*'$('*"<<'EOF'"*)
+                  echo "nested heredoc in $f: $line"; fail=1 ;;
+              esac
+            done < "$f"
+          done
+          [ $fail -ne 0 ] && exit 1
+          echo "no nested heredocs"
       - name: Check bash 3.2 compatibility (macOS default)
         run: |
           fail=0

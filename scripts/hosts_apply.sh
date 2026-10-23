@@ -383,89 +383,69 @@ if [ -n "${GOTO_GITHUB_FORCE_IP:-}" ]; then
     ip="$GOTO_GITHUB_FORCE_IP"
     used_strategy="\"forced\""
 fi
+# ---- Result emission -------------------------------------------------------
+# One function for every exit path. The previous version inlined
+# `printf '%s' "$(cat <<EOF ... EOF)"` four times; bash 3.2 (macOS default)
+# mis-parses a heredoc nested inside a command substitution, which produced
+#   line 342: syntax error near unexpected token `;;'
+# at an unrelated line and made hosts_apply die before writing anything.
+# Plain string concatenation has no such ambiguity.
+emit_result() {
+    local applied="$1" ipv="$2" entries="$3" backup="$4" dns="$5"
+    local warn_json="" first=1 w
 
-if [ -z "$ip" ]; then
-    add_warning "no working GitHub IP found via strategy '$STRATEGY'"
-    warn_json="["
-    first=1
-    for w in "${warnings[@]}"; do
+    for w in ${warnings[@]+"${warnings[@]}"}; do
         [ $first -eq 0 ] && warn_json+=","
         warn_json+="\"$(json_escape "$w")\""
         first=0
     done
-    warn_json+="]"
-    printf '%s\n' "$(cat <<EOF
-{"applied":false,"strategy":$used_strategy,"ip":null,"entries_written":0,"backup":null,"shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":false,"warnings":$warn_json}
-EOF
-)"
+    warn_json="[$warn_json]"
+
+    local ip_json="null"
+    [ -n "$ipv" ] && ip_json="\"$ipv\""
+
+    local backup_json="null"
+    [ -n "$backup" ] && backup_json="\"$(json_escape "$backup")\""
+
+    printf '{"applied":%s,"strategy":%s,"ip":%s,"entries_written":%s,"backup":%s,"shadowing":{"checked":true,"found":%s,"detail":%s},"dns_flushed":%s,"warnings":%s}\n' \
+        "$applied" "$used_strategy" "$ip_json" "$entries" "$backup_json" \
+        "$shadow_found" "$shadow_detail" "$dns" "$warn_json"
+}
+
+if [ -z "$ip" ]; then
+    add_warning "no working GitHub IP found via strategy '$STRATEGY'"
+    emit_result "false" "" "0" "" "false"
     exit 1
 fi
 
 echo "  selected IP: $ip (strategy: $used_strategy)" >&2
 
-# ── Build the block and write ────────────────────────────────────────────────
+# ---- Backup then write -----------------------------------------------------
 backup_result=$(backup_hosts) || {
-    warn_json="["
-    first=1
-    for w in "${warnings[@]}"; do
-        [ $first -eq 0 ] && warn_json+=","
-        warn_json+="\"$(json_escape "$w")\""
-        first=0
-    done
-    warn_json+="]"
-    printf '%s\n' "$(cat <<EOF
-{"applied":false,"strategy":$used_strategy,"ip":"$ip","entries_written":0,"backup":null,"shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":false,"warnings":$warn_json}
-EOF
-)"
+    emit_result "false" "$ip" "0" "" "false"
     exit 1
 }
 
 if ! write_hosts_block "$ip"; then
-    warn_json="["
-    first=1
-    for w in "${warnings[@]}"; do
-        [ $first -eq 0 ] && warn_json+=","
-        warn_json+="\"$(json_escape "$w")\""
-        first=0
-    done
-    warn_json+="]"
-    printf '%s\n' "$(cat <<EOF
-{"applied":false,"strategy":$used_strategy,"ip":"$ip","entries_written":0,"backup":"$(json_escape "$backup_result")","shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":false,"warnings":$warn_json}
-EOF
-)"
+    emit_result "false" "$ip" "0" "$backup_result" "false"
     exit 1
 fi
-
-backup_path="$backup_result"
-# Escape for JSON: Windows paths carry backslashes, which are escape
-# characters in JSON strings. Unescaped they make the whole line unparseable
-# (ConvertFrom-Json: "Unrecognized escape sequence").
-backup_path_json="$(json_escape "$backup_path")"
 
 # Count entries actually written inside the marker block
 entries=$(sed -n "/^${MARKER_START}/,/^${MARKER_END}$/p" "$HOSTS_FILE" 2>/dev/null \
     | grep -cE '^\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+case "$entries" in
+    ''|*[!0-9]*) entries=0 ;;
+esac
 
-# ── Shadowing check (after) ──────────────────────────────────────────────────
+# ---- Shadowing check (after) ----------------------------------------------
 check_shadowing_detail || true
 
-# ── DNS flush ────────────────────────────────────────────────────────────────
+# ---- DNS flush -------------------------------------------------------------
 dns_flushed="true"
 if ! flush_dns_cache >/dev/null 2>&1; then
     dns_flushed="false"
     add_warning "DNS cache flush failed; hosts is written but cached entries may persist"
 fi
 
-warn_json="["
-first=1
-for w in "${warnings[@]}"; do
-    [ $first -eq 0 ] && warn_json+=","
-    warn_json+="\"$(json_escape "$w")\""
-    first=0
-done
-warn_json+="]"
-
-printf '%s\n' "$(cat <<EOF
-{"applied":true,"strategy":$used_strategy,"ip":"$ip","entries_written":$entries,"backup":"$backup_path_json","shadowing":{"checked":true,"found":$shadow_found,"detail":$shadow_detail},"dns_flushed":$dns_flushed,"warnings":$warn_json}
-EOF
-)"
+emit_result "true" "$ip" "$entries" "$backup_result" "$dns_flushed"

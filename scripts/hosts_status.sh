@@ -222,7 +222,6 @@ if [ ${#warnings[@]} -gt 0 ]; then
     warn_json+="]"
 fi
 
-printf '%s\n' "$(cat <<EOF
+cat <<EOF
 {"timestamp":"$timestamp","installed":$installed,"current_ip":$current_ip,"endpoints":[$endpoints_json],"verdict":"$verdict","auth":{"ssh":"$auth_ssh","https":"$auth_https"},"warnings":$warn_json}
 EOF
-)"

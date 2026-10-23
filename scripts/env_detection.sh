@@ -269,7 +269,6 @@ fi
 
 # Emit the JSON line and nothing else on stdout. Any diagnostic that must
 # reach the user goes to stderr (above, via add_warning -> warnings[]).
-printf '%s\n' "$(cat <<EOF
+cat <<EOF
 {"shell":"bash","platform":"$platform","curl":{"available":$curl_available,"path":"$curl_path"},"hosts_entry":{"present":$hosts_present,"ip":$hosts_ip,"shadowed":$hosts_shadowed,"shadowing_detail":$hosts_shadow_detail},"proxy":{"enabled":$proxy_enabled,"server":$proxy_server,"source":"$proxy_source"},"dns_servers":$dns_json,"doh":$doh_json,"gh_auth":{"state":"$gh_state","warning":$gh_warning},"privileged":$privileged,"warnings":$warn_json}
 EOF
-)"

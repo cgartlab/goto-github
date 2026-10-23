@@ -135,7 +135,6 @@ if [ "$ATTEMPTS" -lt 5 ]; then
     warn_json="[\"sample_size is $ATTEMPTS (below 5); the success rate is not statistically meaningful\"]"
 fi
 
-printf '%s\n' "$(cat <<EOF
+cat <<EOF
 {"timestamp":"$timestamp","proxy_bypassed":true,"attempts":$ATTEMPTS,"scope":"$SCOPE","endpoints":[$endpoints_json],"warnings":$warn_json}
 EOF
-)"

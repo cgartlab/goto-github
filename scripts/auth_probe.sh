@@ -206,7 +206,6 @@ if [ ${#warnings[@]} -gt 0 ]; then
     warn_json+="]"
 fi
 
-printf '%s\n' "$(cat <<EOF
+cat <<EOF
 {"ssh":{"state":"$ssh_state","detail":$ssh_detail},"https":{"state":"$https_state","detail":$https_detail},"gh":{"state":"$gh_state","warning":$gh_warning},"warnings":$warn_json}
 EOF
-)"
