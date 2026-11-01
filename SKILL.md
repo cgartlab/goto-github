@@ -4,10 +4,10 @@ description: GitHub 访问诊断与加速 skill。当用户说 GitHub 连不上/
 license: MIT
 compatibility: Requires bash 3.2+ or PowerShell 5.1+ (both supported on every platform; the script layer is a twin bash/PowerShell implementation with identical JSON output). curl is mandatory for probing. hosts modification requires admin/root privileges. All analysis is local - no third-party services.
 metadata:
+  kind: skill
   version: "2.1.0"
   date: "2026-10-23"
-  reference: "https://github.com/cgartlab/goto-github"
----
+  reference: "https://github.com/cgartlab/goto-github"---
 
 # GoToGitHub — GitHub 连通性诊断与加速
 
