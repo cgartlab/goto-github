@@ -72,7 +72,7 @@ test_filter_ignores_noncore() {
 HTTP_CODE="200"
 MOCK_BODY="001e# service=git-upload-pack"
 curl() {
-    local a url="" outfile=""
+    local url="" outfile=""
     local -a args=("$@")
     local i
     for i in "${!args[@]}"; do
