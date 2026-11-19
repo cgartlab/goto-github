@@ -23,3 +23,6 @@ pkg/
 .omo/
 
 .opencode/
+
+# Agent git worktrees (nested checkouts under .worktrees/)
+.worktrees/
