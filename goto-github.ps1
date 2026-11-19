@@ -1,4 +1,4 @@
-﻿# GoToGitHub — Pure PowerShell hosts fetch script
+# GoToGitHub — Pure PowerShell hosts fetch script
 # Fetches verified GitHub CDN IPs from community-maintained hosts sources and
 # applies them to the Windows hosts file. No Git Bash required.
 
@@ -20,7 +20,7 @@ $script:SOURCES = @(
     'https://raw.githubusercontent.com/521xueweihan/GitHub520/main/hosts'
 )
 $script:LAST_SOURCE_URL = $null
-$script:VERSION = 'v1.0.0'
+$script:VERSION = 'v1.0.1'
 
 # Known-good candidate IP pools (verified reachable for direct access)
 $script:FASTLY_IPS = @(

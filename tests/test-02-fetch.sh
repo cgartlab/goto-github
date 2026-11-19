@@ -67,29 +67,50 @@ test_filter_ignores_noncore() {
 
 # ── Test functions: probe_one_ip ───────────────────────────────────────
 # Mock curl to emit a configurable HTTP code for the probe target.
+# It also writes a body (like real curl does with -o FILE): a passing probe
+# must see a real git advertisement, not just a 2xx status.
 HTTP_CODE="200"
+MOCK_BODY="001e# service=git-upload-pack"
 curl() {
-    local a url=""
-    for a in "$@"; do
-        case "$a" in
-            http*) url="$a" ;;
+    local a url="" outfile=""
+    local -a args=("$@")
+    local i
+    for i in "${!args[@]}"; do
+        case "${args[$i]}" in
+            http*) url="${args[$i]}" ;;
+            -o) outfile="${args[$((i + 1))]:-}" ;;
         esac
     done
     case "$url" in
-        *gitignore*) printf '%s' "${HTTP_CODE:-200}" ;;
+        *gitignore*)
+            if [ -n "$outfile" ] && [ "$outfile" != "/dev/null" ]; then
+                printf '%s' "${MOCK_BODY:-}" > "$outfile" 2>/dev/null || true
+            fi
+            printf '%s' "${HTTP_CODE:-200}"
+            ;;
         *) printf '%s' "${MOCK_SOURCE_CONTENT:-}" ;;
     esac
 }
 
-test_probe_one_ip_accepts_2xx() {
+test_probe_one_ip_accepts_real_advertisement() {
     HTTP_CODE=200
+    MOCK_BODY="001e# service=git-upload-pack"
     assert_equals "1.2.3.4" "$(probe_one_ip '1.2.3.4')"
-    HTTP_CODE=204
-    assert_equals "1.2.3.4" "$(probe_one_ip '1.2.3.4')"
+}
+
+# A 200 whose body is the 4-byte string "OK" is a fake edge, not a mirror.
+# It used to pass (status-only check) and then every download failed a hash check.
+test_probe_one_ip_rejects_ok_body() {
+    HTTP_CODE=200
+    MOCK_BODY="OK"
+    assert_equals "" "$(probe_one_ip '1.2.3.4')"
+    MOCK_BODY=""
+    assert_equals "" "$(probe_one_ip '1.2.3.4')"
 }
 
 test_probe_one_ip_rejects_non_2xx() {
     HTTP_CODE=400
+    MOCK_BODY="001e# service=git-upload-pack"
     assert_equals "" "$(probe_one_ip '1.2.3.4')"
     HTTP_CODE=000
     assert_equals "" "$(probe_one_ip '1.2.3.4')"
@@ -137,8 +158,9 @@ run_test "filter_dead_core_ips keeps reachable"        test_filter_keeps_reachab
 run_test "filter_dead_core_ips drops dead core IPs"    test_filter_drops_dead_core
 run_test "filter_dead_core_ips fails when all core dead" test_filter_fails_when_all_core_dead
 run_test "filter_dead_core_ips ignores non-core domains" test_filter_ignores_noncore
-run_test "probe_one_ip accepts 2xx"                    test_probe_one_ip_accepts_2xx
-run_test "probe_one_ip rejects non-2xx"                test_probe_one_ip_rejects_non_2xx
+run_test "probe_one_ip accepts a real git advertisement"    test_probe_one_ip_accepts_real_advertisement
+run_test "probe_one_ip rejects a 200 with an OK body"        test_probe_one_ip_rejects_ok_body
+run_test "probe_one_ip rejects non-2xx"                      test_probe_one_ip_rejects_non_2xx
 run_test "probe_github_ip succeeds on reachable candidate" test_probe_github_ip_success
 run_test "probe_github_ip fails when all unreachable"  test_probe_github_ip_all_unreachable
 run_test "probe_github_ip fails on empty sources"      test_probe_github_ip_empty_sources

@@ -99,9 +99,16 @@ $($script:MARKER_END)
 }
 
 function Test_TestIpQuick_ReachableIP {
-    # 140.82.112.3 in our mock returns 200 → true
+    # 140.82.112.3 in our mock returns 200 with a real git advertisement → true
     $r = Test-IpQuick -IP '140.82.112.3'
-    Assert-True $r "Mock returns 200 → should be reachable"
+    Assert-True $r "Mock returns 200 with a git advertisement → should be reachable"
+}
+
+function Test_TestIpQuick_RejectsOkBody {
+    # 140.82.112.9 in our mock returns 200 but the body is the 4-byte "OK"
+    # (the fake-edge case). Status alone must not be enough.
+    $r = Test-IpQuick -IP '140.82.112.9'
+    Assert-False $r "Mock returns 200 with body OK → must NOT count as reachable"
 }
 
 function Test_TestIpQuick_ServerError {
@@ -136,6 +143,7 @@ Run-Test "Get-IpFromHosts: ignores content outside markers"  { Test_GetIpFromHos
 Run-Test "Get-IpFromHosts: empty marker block → null"   { Test_GetIpFromHosts_EmptyMarkerBlock }
 Run-Test "Get-IpFromHosts: marker not at start of file"  { Test_GetIpFromHosts_MarkerNotAtStart }
 Run-Test "Test-IpQuick: reachable IP → true"            { Test_TestIpQuick_ReachableIP }
+Run-Test "Test-IpQuick: 200 with OK body → false"       { Test_TestIpQuick_RejectsOkBody }
 Run-Test "Test-IpQuick: 500 → false"                    { Test_TestIpQuick_ServerError }
 Run-Test "Test-IpQuick: 404 → false"                    { Test_TestIpQuick_NotFound }
 Run-Test "Test-IpQuick: no curl → false"                { Test_TestIpQuick_NoCurl }

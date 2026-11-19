@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 # Mirror base URLs (repo root, no trailing file path), tried in order.
 # Override with: export GOTO_GITHUB_MIRRORS="base1 base2 ..."

@@ -56,14 +56,31 @@ filter_dead_core_ips() {
 # Pool = unique IPs the sources still serve, each expanded to a ±PROBE_RADIUS
 # window per /24. Probed in parallel via --resolve (SNI still routes the
 # request to github.com, so the IP must actually serve that Host).
+#
+# A bare 2xx is NOT proof. Some networks answer github.com with a synthetic
+# "200 OK" whose body is the 4-byte string "OK" (per-IP interference seen on CN
+# lines): it passes a status-code check and then every real download fails a
+# hash check. So require a 2xx AND a body that parses as a git smart-http
+# advertisement (starts with the 4-hex-digit pkt-line length, e.g. "001e").
+#
+# The body goes to a file: the advertisement is binary and command substitution
+# drops NUL bytes. Fake edges also flake between "200 + OK" and a timeout, so
+# both are rejected by the same check.
 probe_one_ip() {
-    local cand="$1" rc
-    rc=$(curl -s -o /dev/null --connect-timeout 4 --max-time "$PROBE_TIMEOUT" \
+    local cand="$1" rc first tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/goto-github-probe-body.XXXXXX") || return 0
+    rc=$(curl -s -o "$tmp" --connect-timeout 4 --max-time "$PROBE_TIMEOUT" \
         -w "%{http_code}" -H "Accept: application/x-git-upload-pack-advertisement" \
         "$PROBE_TARGET" \
         --resolve "github.com:443:${cand}" 2>/dev/null || true)
     case "$rc" in
-        2*) printf '%s\n' "$cand" ;;
+        2*) ;;
+        *) rm -f "$tmp"; return 0 ;;
+    esac
+    first=$(head -c 4 "$tmp" 2>/dev/null | tr -d '\000')
+    rm -f "$tmp"
+    case "$first" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f]) printf '%s\n' "$cand" ;;
     esac
 }
 

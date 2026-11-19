@@ -20,6 +20,15 @@ implementation's defects, but the shipped CLI entry points behave the same, so
 the CLI artifacts stay at 1.0.0. Do not "helpfully" sync the two numbers — an
 `install.sh --update` against a mismatched `VERSION` reports a bogus upgrade.
 
+## [Unreleased]
+
+### Fixed — CLI 1.0.1（假 200 OK 探测）
+
+- **2xx 不再是可用性证据**：部分网络对 `github.com` 返回合成 `200 OK`，body 只有 4 字节 `OK`；只看状态码会选中这类边缘 IP，随后每次真实下载都卡在校验和上。`probe_one_ip`（bash）、`Test-IpQuick`（`ps1/`）与 `show_status` 的连通性复测现在都要求 body 前 4 字节是 pkt-line 长度（`^[0-9a-f]{4}$`），status 文案改为「serves real git traffic」/「unreachable or answering a fake response」。
+- body 写入临时文件而不是命令替换：git smart-http advertisement 是二进制，命令替换会丢 NUL 字节。
+- 假边缘会在「200 + OK」与超时之间抖动，两者都由同一判定拒绝；测试补了 `200 with OK body → false` 用例。
+- **CLI 制品版本 1.0.0 → 1.0.1**（`install.sh` `VERSION`、`goto-github.ps1` `$script:VERSION`、`fetch.sh --version` 输出）；Skill 契约未变，`SKILL.md metadata.version` 仍为 2.1.0。
+
 2.1.0 keeps that split: the skill's service surface, auth model and platform
 support all changed, while the CLI entry points still behave the same, so the
 CLI artifacts remain at 1.0.0.
