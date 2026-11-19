@@ -46,6 +46,7 @@
 ## 安装与发布
 
 - 失误：跳过 shellcheck 提交 → 规则：`make lint`（shellcheck fetch.sh install.sh tests/）必须 0 warnings（见 AGENTS.md「ANTI-PATTERNS」）
+- 失误：本机 Git Bash 没有 `make`，于是只跑了 `bash tests/test-*.sh` 就提交，跳过了 shellcheck；CI 的 ShellCheck 步骤被测试 mock 里的未用局部变量（SC2034）判红，PR 白跑一轮 → 规则：`make` 不可用时手动跑等价命令 `shellcheck --severity=warning fetch.sh install.sh lib/*.sh shared/*.sh tests/*.sh scripts/*.sh`，lint 与 test 必须都跑（2026-11-20）
 - 失误：直推 `main` → 规则：始终走 PR，PR 指向 `main`（见 AGENTS.md「ANTI-PATTERNS」）
 - 失误：安装脚本无校验和，用户拿不到完整性保证 → 规则：install 加 checksum 校验（commit 915da98）
 - 失误：bootstrap 用会过期的 CDN 当主 URL → 规则：GitHub raw 作主 URL，并给下载内容加 BOM（commit 2d4db84）

@@ -12,20 +12,25 @@ $script:GOTO_GITHUB_PS1_03_INCLUDED = $true
 function Test-IpQuick {
     <#
     .SYNOPSIS
-    Test whether an IP returns HTTP 200/301/302 (no content size check).
-    Faster than Test-Ip (in 02-scan.ps1) because it skips size validation.
+    Test whether an IP serves a real git smart-http advertisement.
     Returns $true on success, $false otherwise.
+
+    A bare 2xx is NOT proof: some networks answer github.com with a synthetic
+    "200 OK" whose body is the 4-byte string "OK". Checking status alone would
+    accept it and then every real download fails a hash check. So the body is
+    captured and must start with a 4-hex-digit pkt-line length (e.g. "001e").
     #>
     param([string]$IP)
 
     $curlPath = Find-Curl
     if (-not $curlPath) { return $false }
 
+    $bodyFile = [System.IO.Path]::GetTempFileName()
     try {
         # Probe the git smart-http endpoint, not the homepage: an IP can serve
         # the homepage while timing out on git traffic.
         $code = & $curlPath --resolve "github.com:443:$IP" `
-            -s -o NUL `
+            -s -o $bodyFile `
             -w "%{http_code}" `
             --connect-timeout $script:CONNECT_TIMEOUT `
             --max-time $script:MAX_TIME `
@@ -33,9 +38,16 @@ function Test-IpQuick {
             $script:PROBE_TARGET 2>$null
 
         if ($LASTEXITCODE -ne 0) { return $false }
-        return ($code -eq '200' -or $code -eq '301' -or $code -eq '302')
+        if ($code -ne '200') { return $false }
+
+        $bytes = [System.IO.File]::ReadAllBytes($bodyFile)
+        if ($bytes.Length -lt 4) { return $false }
+        $head = [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4)
+        return ($head -match '^[0-9a-f]{4}$')
     } catch {
         return $false
+    } finally {
+        Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
     }
 }
 

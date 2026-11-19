@@ -400,7 +400,7 @@ main() {
             echo "Platforms: macOS · Linux · Git Bash (Windows)"
             ;;
         --version|-v)
-            echo "GoToGitHub v1.0.0"
+            echo "GoToGitHub v1.0.1"
             echo "https://github.com/cgartlab/goto-github"
             ;;
         "")

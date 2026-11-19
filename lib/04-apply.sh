@@ -133,16 +133,22 @@ show_status() {
         echo "  Entries: $ip_count"
         echo "  github.com: $has_github entry(s)"
 
-        # Test actual connectivity through hosts file
-        local http_code
+        # Test actual connectivity through hosts file.
+        # Not the homepage, and not just the status code: a fake edge answers
+        # "200 OK" with a 4-byte body. Require a real git advertisement.
+        local http_code body_file body_head
+        body_file=$(mktemp "${TMPDIR:-/tmp}/goto-verify.XXXXXX") || body_file=/dev/null
         http_code=$(curl -s --connect-timeout 10 --max-time 20 \
             "${CURL_RETRY_OPTS[@]}" \
-            -o /dev/null -w "%{http_code}" \
-            "https://github.com/" 2>/dev/null || true)
-        if is_http_code_ok "$http_code"; then
-            echo -e "  Status: ${GREEN}OK${NC} — github.com reachable (HTTP $http_code)"
+            -H "Accept: application/x-git-upload-pack-advertisement" \
+            -o "$body_file" -w "%{http_code}" \
+            "$PROBE_TARGET" 2>/dev/null || true)
+        body_head=$(head -c 4 "$body_file" 2>/dev/null | tr -d '\000')
+        [ "$body_file" = "/dev/null" ] || rm -f "$body_file"
+        if is_http_code_ok "$http_code" && [[ "$body_head" =~ ^[0-9a-f]{4}$ ]]; then
+            echo -e "  Status: ${GREEN}OK${NC} — github.com serves real git traffic (HTTP $http_code)"
         else
-            echo -e "  Status: ${RED}FAILED${NC} — github.com unreachable"
+            echo -e "  Status: ${RED}FAILED${NC} — github.com unreachable or answering a fake response (HTTP $http_code)"
         fi
     fi
     echo ""
